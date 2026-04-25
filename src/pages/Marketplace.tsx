@@ -96,7 +96,7 @@ const Marketplace = () => {
       currency: "KES",
       reference: `booking-${Date.now()}`,
       phone: buyerForm.phone_number,
-      channels: ["mobile_money", "card", "bank", "ussd"],
+      channels: ["mobile_money"],
       onSuccess: async (response: any) => {
         // Payment successful
         try {

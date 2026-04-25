@@ -100,7 +100,7 @@ const FarmerRegistration = () => {
         currency: "KES",
         reference: `registration-${Date.now()}`,
         phone: form.phone_number,
-        channels: ["mobile_money", "card", "bank", "ussd"],
+        channels: ["mobile_money"],
         onSuccess: async (response: any) => {
           // Payment successful
           try {
