@@ -15,6 +15,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { Sprout, Users, ShoppingCart, LogOut, CheckCircle, XCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import type { Tables as DbTables } from "@/integrations/supabase/types";
+import { HARVEST_DAYS } from "@/data/kenyaLocations";
+
+const getEstimatedHarvest = (plantingDate: string, variety: string) => {
+  const days = HARVEST_DAYS[variety] || 100;
+  const d = new Date(plantingDate);
+  d.setDate(d.getDate() + days);
+  return d;
+};
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -248,6 +256,7 @@ const AdminDashboard = () => {
                     <TableHead>County / Ward</TableHead>
                     <TableHead>Variety</TableHead>
                     <TableHead>Acreage</TableHead>
+                    <TableHead>Est. Harvest</TableHead>
                     <TableHead>Fee</TableHead>
                     <TableHead>Payment</TableHead>
                     <TableHead>Status</TableHead>
@@ -264,6 +273,7 @@ const AdminDashboard = () => {
                       <TableCell>{f.county}, {f.ward}</TableCell>
                       <TableCell>{f.potato_variety}</TableCell>
                       <TableCell>{f.acreage_planted}</TableCell>
+                      <TableCell className="text-xs">{format(getEstimatedHarvest(f.planting_date, f.potato_variety), "dd MMM yy")}</TableCell>
                       <TableCell>Ksh {f.registration_fee?.toLocaleString() ?? "0"}</TableCell>
                       <TableCell>
                         <Select
