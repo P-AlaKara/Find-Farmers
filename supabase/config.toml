@@ -1,1 +1,4 @@
 project_id = "hsnbtetbdaefvvfgoale"
+
+[functions.external-get-farmers]
+verify_jwt = false
