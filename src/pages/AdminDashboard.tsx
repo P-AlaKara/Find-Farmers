@@ -273,6 +273,7 @@ const AdminDashboard = () => {
                       <TableCell>{f.county}, {f.ward}</TableCell>
                       <TableCell>{f.potato_variety}</TableCell>
                       <TableCell>{f.acreage_planted}</TableCell>
+                      <TableCell className="text-xs">{format(getEstimatedHarvest(f.planting_date, f.potato_variety), "dd MMM yy")}</TableCell>
                       <TableCell>Ksh {f.registration_fee?.toLocaleString() ?? "0"}</TableCell>
                       <TableCell>
                         <Select
