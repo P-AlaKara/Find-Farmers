@@ -256,6 +256,7 @@ const AdminDashboard = () => {
                     <TableHead>County / Ward</TableHead>
                     <TableHead>Variety</TableHead>
                     <TableHead>Acreage</TableHead>
+                    <TableHead>Est. Harvest</TableHead>
                     <TableHead>Fee</TableHead>
                     <TableHead>Payment</TableHead>
                     <TableHead>Status</TableHead>
