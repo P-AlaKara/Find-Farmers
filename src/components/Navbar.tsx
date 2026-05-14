@@ -1,6 +1,5 @@
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { ShieldCheck } from "lucide-react";
 
 const Navbar = () => {
   const navigate = useNavigate();
@@ -22,9 +21,6 @@ const Navbar = () => {
           </Button>
           <Button variant="outline" onClick={() => navigate("/register-farmer")}>
             Register as Farmer
-          </Button>
-          <Button variant="ghost" size="icon" onClick={() => navigate("/admin/login")} title="Admin">
-            <ShieldCheck className="h-5 w-5" />
           </Button>
         </div>
       </div>
