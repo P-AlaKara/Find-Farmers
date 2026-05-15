@@ -317,23 +317,26 @@ const Marketplace = () => {
       </div>
 
       {/* Booking Dialog */}
-      <Dialog open={!!bookingFarmer} onOpenChange={(o) => !o && setBookingFarmer(null)}>
+      <Dialog open={!!bookingFarmer} onOpenChange={(o) => !o && closeModal()}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">Book Farmer {bookingFarmer?.farmer_id}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleBooking} className="space-y-4">
+          <form onSubmit={handleBooking} className="space-y-4" noValidate>
             <div className="space-y-2">
-              <Label>Name (Individual or Business) *</Label>
-              <Input value={buyerForm.buyer_name} onChange={(e) => setBuyerForm((p) => ({ ...p, buyer_name: e.target.value }))} required />
+              <Label>Full Name *</Label>
+              <Input value={buyerForm.buyer_name} onChange={(e) => setBuyerForm((p) => ({ ...p, buyer_name: e.target.value }))} />
+              {fieldErrors.buyer_name && <p className="text-xs text-destructive">{fieldErrors.buyer_name}</p>}
             </div>
             <div className="space-y-2">
               <Label>Phone Number *</Label>
-              <Input value={buyerForm.phone_number} onChange={(e) => setBuyerForm((p) => ({ ...p, phone_number: e.target.value }))} required />
+              <Input value={buyerForm.phone_number} onChange={(e) => setBuyerForm((p) => ({ ...p, phone_number: e.target.value }))} />
+              {fieldErrors.phone_number && <p className="text-xs text-destructive">{fieldErrors.phone_number}</p>}
             </div>
             <div className="space-y-2">
               <Label>Email *</Label>
-              <Input type="email" value={buyerForm.email} onChange={(e) => setBuyerForm((p) => ({ ...p, email: e.target.value }))} required />
+              <Input type="email" value={buyerForm.email} onChange={(e) => setBuyerForm((p) => ({ ...p, email: e.target.value }))} />
+              {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
             </div>
             <div className="space-y-2">
               <Label>County *</Label>
@@ -343,20 +346,28 @@ const Marketplace = () => {
                   {Object.keys(KENYA_COUNTIES).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {fieldErrors.county && <p className="text-xs text-destructive">{fieldErrors.county}</p>}
             </div>
             <div className="space-y-2">
-              <Label>Acres to Book</Label>
-              <Input type="number" min="0.0001" step="0.0001" placeholder="e.g. 0.0001" value={buyerForm.acres_to_book} onChange={(e) => setBuyerForm((p) => ({ ...p, acres_to_book: e.target.value }))} />
+              <Label>Acres to Book * (max {bookingFarmer?.acreage_planted})</Label>
+              <Input type="number" min="0.1" step="0.1" placeholder="e.g. 1" value={buyerForm.acres_to_book} onChange={(e) => setBuyerForm((p) => ({ ...p, acres_to_book: e.target.value }))} />
+              {fieldErrors.acres_to_book && <p className="text-xs text-destructive">{fieldErrors.acres_to_book}</p>}
             </div>
 
             <div className="rounded-lg border bg-secondary/50 p-4">
               <p className="text-sm text-muted-foreground">Total Price:</p>
               <p className="font-display text-2xl font-bold text-primary">Ksh {totalPrice.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">{buyerForm.acres_to_book} acre(s) × Ksh 5,000</p>
+              <p className="text-xs text-muted-foreground">{buyerForm.acres_to_book || 0} acre(s) × Ksh 5,000</p>
             </div>
 
+            {modalMessage && (
+              <div className={`rounded-md border p-3 text-sm ${modalMessage.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-primary/30 bg-primary/10 text-foreground"}`}>
+                {modalMessage.text}
+              </div>
+            )}
+
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Processing Payment..." : "Pay with Paystack"}
+              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>) : "Pay with Paystack"}
             </Button>
           </form>
         </DialogContent>
