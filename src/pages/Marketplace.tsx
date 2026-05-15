@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,9 +13,33 @@ import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { KENYA_COUNTIES, POTATO_VARIETIES, HARVEST_DAYS } from "@/data/kenyaLocations";
-import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search } from "lucide-react";
+import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2 } from "lucide-react";
 import { format, addDays } from "date-fns";
-import PaystackInline from "@paystack/inline-js";
+
+declare global {
+  interface Window {
+    PaystackPop?: any;
+  }
+}
+
+const PAYSTACK_INLINE_SRC = "https://js.paystack.co/v1/inline.js";
+const loadPaystack = (): Promise<any> =>
+  new Promise((resolve, reject) => {
+    if (typeof window === "undefined") return reject(new Error("No window"));
+    if (window.PaystackPop) return resolve(window.PaystackPop);
+    const existing = document.querySelector(`script[src="${PAYSTACK_INLINE_SRC}"]`) as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.PaystackPop));
+      existing.addEventListener("error", () => reject(new Error("Failed to load Paystack")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = PAYSTACK_INLINE_SRC;
+    s.async = true;
+    s.onload = () => resolve(window.PaystackPop);
+    s.onerror = () => reject(new Error("Failed to load Paystack"));
+    document.head.appendChild(s);
+  });
 
 const getEstimatedHarvest = (plantingDate: string, variety: string) => {
   const days = HARVEST_DAYS[variety] || 100;
@@ -33,11 +56,14 @@ const statusColor = (status: string) => {
 };
 
 const Marketplace = () => {
-  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState({ county: "", variety: "", search: "" });
   const [bookingFarmer, setBookingFarmer] = useState<any>(null);
   const [buyerForm, setBuyerForm] = useState({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: "" });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [modalMessage, setModalMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
+  const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
   const { data: farmers = [], isLoading } = useQuery({
     queryKey: ["marketplace-farmers"],
@@ -65,120 +91,90 @@ const Marketplace = () => {
 
   const openBooking = (farmer: any) => {
     setBookingFarmer(farmer);
-    setBuyerForm({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: String(farmer.acreage_planted) });
+    setBuyerForm({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: "" });
+    setFieldErrors({});
+    setModalMessage(null);
+  };
+
+  const closeModal = () => {
+    if (submitting) return;
+    setBookingFarmer(null);
+    setFieldErrors({});
+    setModalMessage(null);
+  };
+
+  const validate = () => {
+    const errs: Record<string, string> = {};
+    if (!buyerForm.buyer_name.trim()) errs.buyer_name = "Full name is required";
+    if (!buyerForm.phone_number.trim()) errs.phone_number = "Phone number is required";
+    if (!buyerForm.email.trim()) errs.email = "Email is required";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerForm.email.trim())) errs.email = "Invalid email";
+    if (!buyerForm.county.trim()) errs.county = "County is required";
+    const acres = parseFloat(buyerForm.acres_to_book);
+    if (!buyerForm.acres_to_book || isNaN(acres) || acres <= 0) {
+      errs.acres_to_book = "Acres must be greater than 0";
+    } else if (bookingFarmer && acres > Number(bookingFarmer.acreage_planted)) {
+      errs.acres_to_book = `Cannot exceed ${bookingFarmer.acreage_planted} acres`;
+    }
+    setFieldErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bookingFarmer) {
-      toast.error("No farmer selected for booking");
-      return;
-    }
+    setModalMessage(null);
+    if (!bookingFarmer || !validate()) return;
 
-    if (!buyerForm.buyer_name || !buyerForm.phone_number || !buyerForm.email || !buyerForm.county) {
-      toast.error("Please fill all fields");
-      return;
-    }
-
-    const acres = parseFloat(buyerForm.acres_to_book) || 0;
-    const amount = acres * 5000;
-    if (amount <= 0) {
-      toast.error("Invalid amount");
-      return;
-    }
-
+    const acres = parseFloat(buyerForm.acres_to_book);
     setSubmitting(true);
-    const paystack = new PaystackInline();
-    paystack.newTransaction({
-      key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-      email: buyerForm.email,
-      amount: Math.round(amount * 100), // in cents
-      currency: "KES",
-      reference: `booking-${Date.now()}`,
-      phone: buyerForm.phone_number,
-      channels: ["mobile_money"],
-      onSuccess: async (response: any) => {
-        // Payment successful
-        try {
-          console.log("Paystack success response:", response);
-          // Check if farmer is still available
-          const { data: currentFarmer, error: farmerCheckError } = await supabase
-            .from("farmers")
-            .select("listing_status")
-            .eq("id", bookingFarmer.id)
-            .single();
 
-          if (farmerCheckError || !currentFarmer || currentFarmer.listing_status !== "available") {
-            console.error("Farmer not available:", farmerCheckError, currentFarmer);
-            toast.error("Farmer is no longer available");
-            setSubmitting(false);
-            return;
-          }
+    try {
+      const { data, error } = await supabase.functions.invoke("initialize-payment", {
+        body: {
+          farmer_id: bookingFarmer.id,
+          name: buyerForm.buyer_name.trim(),
+          phone: buyerForm.phone_number.trim(),
+          email: buyerForm.email.trim(),
+          county: buyerForm.county,
+          acres,
+        },
+      });
 
-          const { data: buyer, error: buyerError } = await supabase
-            .from("buyers")
-            .insert({
-              buyer_name: buyerForm.buyer_name,
-              phone_number: buyerForm.phone_number,
-              email: buyerForm.email,
-              county: buyerForm.county,
-            })
-            .select()
-            .single();
+      if (error || !data?.data?.access_code) {
+        const msg = (data as any)?.error || error?.message || "Failed to initialize payment";
+        setModalMessage({ type: "error", text: msg });
+        setSubmitting(false);
+        return;
+      }
 
-          if (buyerError || !buyer) {
-            console.error("Buyer insert error:", buyerError);
-            toast.error("Failed to register buyer after payment");
-            setSubmitting(false);
-            return;
-          }
-
-          console.log("Buyer created:", buyer.id);
-          const { error: bookingError } = await supabase
-            .from("bookings")
-            .insert({
-              buyer_id: buyer.id,
-              farmer_id: bookingFarmer.id,
-              acres_booked: acres,
-              payment_status: 'paid',
-            });
-
-          if (bookingError) {
-            console.error("Booking insert error:", bookingError);
-            toast.error("Booking failed after payment");
-            setSubmitting(false);
-            return;
-          }
-
-          console.log("Booking created successfully");
+      const { access_code, booking_ref } = data.data;
+      const PaystackPop = await loadPaystack();
+      const handler = PaystackPop.setup({
+        key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
+        email: buyerForm.email.trim(),
+        amount: Math.round(acres * 5000 * 100),
+        ref: booking_ref,
+        access_code,
+        onSuccess: () => {
           setSubmitting(false);
-          toast.success("Booking successful!");
           setBookingFarmer(null);
-          navigate("/payment-success", {
-            state: {
-              type: "booking",
-              buyerName: buyerForm.buyer_name,
-              farmerId: bookingFarmer.farmer_id,
-              acresBooked: buyerForm.acres_to_book,
-              amountPaid: amount,
-              reference: response.reference,
-            },
-          });
-        } catch (err) {
-          console.error("Unexpected error in onSuccess:", err);
-          toast.error("An unexpected error occurred");
+          setFieldErrors({});
+          setModalMessage(null);
+          setSuccessBanner("Booking confirmed! We will be in touch shortly.");
+          toast.success("Booking confirmed! We will be in touch shortly.");
+          queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
+        },
+        onCancel: () => {
           setSubmitting(false);
-        }
-      },
-      onError: (error: any) => {
-        console.error("Paystack error", error);
-        toast.error("Payment failed. Please try again.");
-        setSubmitting(false);
-      },
-      onClose: () => {
-        setSubmitting(false);
-      },
-    });
+          setModalMessage({ type: "info", text: "Payment cancelled. You can try again." });
+        },
+      });
+      handler.openIframe();
+    } catch (err: any) {
+      console.error(err);
+      setModalMessage({ type: "error", text: err?.message || "Something went wrong" });
+      setSubmitting(false);
+    }
   };
 
   const totalPrice = (parseFloat(buyerForm.acres_to_book) || 0) * 5000;
@@ -229,6 +225,15 @@ const Marketplace = () => {
           <p className="mt-1 text-muted-foreground">Browse available potato farms sorted by nearest harvest date</p>
         </div>
 
+        {successBanner && (
+          <div className="mb-6 flex items-start justify-between gap-4 rounded-lg border border-primary/30 bg-primary/10 p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 text-primary" />
+              <p className="text-sm font-medium text-foreground">{successBanner}</p>
+            </div>
+            <button onClick={() => setSuccessBanner(null)} className="text-sm text-muted-foreground hover:text-foreground">Dismiss</button>
+          </div>
+        )}
         {/* Filters */}
         <div className="mb-6 flex flex-wrap gap-3">
           <div className="relative w-64">
@@ -312,23 +317,26 @@ const Marketplace = () => {
       </div>
 
       {/* Booking Dialog */}
-      <Dialog open={!!bookingFarmer} onOpenChange={(o) => !o && setBookingFarmer(null)}>
+      <Dialog open={!!bookingFarmer} onOpenChange={(o) => !o && closeModal()}>
         <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="font-display">Book Farmer {bookingFarmer?.farmer_id}</DialogTitle>
           </DialogHeader>
-          <form onSubmit={handleBooking} className="space-y-4">
+          <form onSubmit={handleBooking} className="space-y-4" noValidate>
             <div className="space-y-2">
-              <Label>Name (Individual or Business) *</Label>
-              <Input value={buyerForm.buyer_name} onChange={(e) => setBuyerForm((p) => ({ ...p, buyer_name: e.target.value }))} required />
+              <Label>Full Name *</Label>
+              <Input value={buyerForm.buyer_name} onChange={(e) => setBuyerForm((p) => ({ ...p, buyer_name: e.target.value }))} />
+              {fieldErrors.buyer_name && <p className="text-xs text-destructive">{fieldErrors.buyer_name}</p>}
             </div>
             <div className="space-y-2">
               <Label>Phone Number *</Label>
-              <Input value={buyerForm.phone_number} onChange={(e) => setBuyerForm((p) => ({ ...p, phone_number: e.target.value }))} required />
+              <Input value={buyerForm.phone_number} onChange={(e) => setBuyerForm((p) => ({ ...p, phone_number: e.target.value }))} />
+              {fieldErrors.phone_number && <p className="text-xs text-destructive">{fieldErrors.phone_number}</p>}
             </div>
             <div className="space-y-2">
               <Label>Email *</Label>
-              <Input type="email" value={buyerForm.email} onChange={(e) => setBuyerForm((p) => ({ ...p, email: e.target.value }))} required />
+              <Input type="email" value={buyerForm.email} onChange={(e) => setBuyerForm((p) => ({ ...p, email: e.target.value }))} />
+              {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
             </div>
             <div className="space-y-2">
               <Label>County *</Label>
@@ -338,20 +346,28 @@ const Marketplace = () => {
                   {Object.keys(KENYA_COUNTIES).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
                 </SelectContent>
               </Select>
+              {fieldErrors.county && <p className="text-xs text-destructive">{fieldErrors.county}</p>}
             </div>
             <div className="space-y-2">
-              <Label>Acres to Book</Label>
-              <Input type="number" min="0.0001" step="0.0001" placeholder="e.g. 0.0001" value={buyerForm.acres_to_book} onChange={(e) => setBuyerForm((p) => ({ ...p, acres_to_book: e.target.value }))} />
+              <Label>Acres to Book * (max {bookingFarmer?.acreage_planted})</Label>
+              <Input type="number" min="0.1" step="0.1" placeholder="e.g. 1" value={buyerForm.acres_to_book} onChange={(e) => setBuyerForm((p) => ({ ...p, acres_to_book: e.target.value }))} />
+              {fieldErrors.acres_to_book && <p className="text-xs text-destructive">{fieldErrors.acres_to_book}</p>}
             </div>
 
             <div className="rounded-lg border bg-secondary/50 p-4">
               <p className="text-sm text-muted-foreground">Total Price:</p>
               <p className="font-display text-2xl font-bold text-primary">Ksh {totalPrice.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">{buyerForm.acres_to_book} acre(s) × Ksh 5,000</p>
+              <p className="text-xs text-muted-foreground">{buyerForm.acres_to_book || 0} acre(s) × Ksh 5,000</p>
             </div>
 
+            {modalMessage && (
+              <div className={`rounded-md border p-3 text-sm ${modalMessage.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-primary/30 bg-primary/10 text-foreground"}`}>
+                {modalMessage.text}
+              </div>
+            )}
+
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? "Processing Payment..." : "Pay with Paystack"}
+              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>) : "Pay with Paystack"}
             </Button>
           </form>
         </DialogContent>
