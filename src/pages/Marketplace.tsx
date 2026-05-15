@@ -1,6 +1,5 @@
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useNavigate } from "react-router-dom";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -14,9 +13,33 @@ import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { KENYA_COUNTIES, POTATO_VARIETIES, HARVEST_DAYS } from "@/data/kenyaLocations";
-import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search } from "lucide-react";
+import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2 } from "lucide-react";
 import { format, addDays } from "date-fns";
-import PaystackInline from "@paystack/inline-js";
+
+declare global {
+  interface Window {
+    PaystackPop?: any;
+  }
+}
+
+const PAYSTACK_INLINE_SRC = "https://js.paystack.co/v1/inline.js";
+const loadPaystack = (): Promise<any> =>
+  new Promise((resolve, reject) => {
+    if (typeof window === "undefined") return reject(new Error("No window"));
+    if (window.PaystackPop) return resolve(window.PaystackPop);
+    const existing = document.querySelector(`script[src="${PAYSTACK_INLINE_SRC}"]`) as HTMLScriptElement | null;
+    if (existing) {
+      existing.addEventListener("load", () => resolve(window.PaystackPop));
+      existing.addEventListener("error", () => reject(new Error("Failed to load Paystack")));
+      return;
+    }
+    const s = document.createElement("script");
+    s.src = PAYSTACK_INLINE_SRC;
+    s.async = true;
+    s.onload = () => resolve(window.PaystackPop);
+    s.onerror = () => reject(new Error("Failed to load Paystack"));
+    document.head.appendChild(s);
+  });
 
 const getEstimatedHarvest = (plantingDate: string, variety: string) => {
   const days = HARVEST_DAYS[variety] || 100;
