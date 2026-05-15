@@ -225,6 +225,15 @@ const Marketplace = () => {
           <p className="mt-1 text-muted-foreground">Browse available potato farms sorted by nearest harvest date</p>
         </div>
 
+        {successBanner && (
+          <div className="mb-6 flex items-start justify-between gap-4 rounded-lg border border-primary/30 bg-primary/10 p-4">
+            <div className="flex items-start gap-3">
+              <CheckCircle2 className="mt-0.5 h-5 w-5 text-primary" />
+              <p className="text-sm font-medium text-foreground">{successBanner}</p>
+            </div>
+            <button onClick={() => setSuccessBanner(null)} className="text-sm text-muted-foreground hover:text-foreground">Dismiss</button>
+          </div>
+        )}
         {/* Filters */}
         <div className="mb-6 flex flex-wrap gap-3">
           <div className="relative w-64">
