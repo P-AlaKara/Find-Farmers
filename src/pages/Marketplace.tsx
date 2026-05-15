@@ -56,11 +56,14 @@ const statusColor = (status: string) => {
 };
 
 const Marketplace = () => {
-  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [filters, setFilters] = useState({ county: "", variety: "", search: "" });
   const [bookingFarmer, setBookingFarmer] = useState<any>(null);
   const [buyerForm, setBuyerForm] = useState({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: "" });
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [modalMessage, setModalMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
+  const [successBanner, setSuccessBanner] = useState<string | null>(null);
 
   const { data: farmers = [], isLoading } = useQuery({
     queryKey: ["marketplace-farmers"],
@@ -88,120 +91,90 @@ const Marketplace = () => {
 
   const openBooking = (farmer: any) => {
     setBookingFarmer(farmer);
-    setBuyerForm({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: String(farmer.acreage_planted) });
+    setBuyerForm({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: "" });
+    setFieldErrors({});
+    setModalMessage(null);
+  };
+
+  const closeModal = () => {
+    if (submitting) return;
+    setBookingFarmer(null);
+    setFieldErrors({});
+    setModalMessage(null);
+  };
+
+  const validate = () => {
+    const errs: Record<string, string> = {};
+    if (!buyerForm.buyer_name.trim()) errs.buyer_name = "Full name is required";
+    if (!buyerForm.phone_number.trim()) errs.phone_number = "Phone number is required";
+    if (!buyerForm.email.trim()) errs.email = "Email is required";
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerForm.email.trim())) errs.email = "Invalid email";
+    if (!buyerForm.county.trim()) errs.county = "County is required";
+    const acres = parseFloat(buyerForm.acres_to_book);
+    if (!buyerForm.acres_to_book || isNaN(acres) || acres <= 0) {
+      errs.acres_to_book = "Acres must be greater than 0";
+    } else if (bookingFarmer && acres > Number(bookingFarmer.acreage_planted)) {
+      errs.acres_to_book = `Cannot exceed ${bookingFarmer.acreage_planted} acres`;
+    }
+    setFieldErrors(errs);
+    return Object.keys(errs).length === 0;
   };
 
   const handleBooking = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!bookingFarmer) {
-      toast.error("No farmer selected for booking");
-      return;
-    }
+    setModalMessage(null);
+    if (!bookingFarmer || !validate()) return;
 
-    if (!buyerForm.buyer_name || !buyerForm.phone_number || !buyerForm.email || !buyerForm.county) {
-      toast.error("Please fill all fields");
-      return;
-    }
-
-    const acres = parseFloat(buyerForm.acres_to_book) || 0;
-    const amount = acres * 5000;
-    if (amount <= 0) {
-      toast.error("Invalid amount");
-      return;
-    }
-
+    const acres = parseFloat(buyerForm.acres_to_book);
     setSubmitting(true);
-    const paystack = new PaystackInline();
-    paystack.newTransaction({
-      key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-      email: buyerForm.email,
-      amount: Math.round(amount * 100), // in cents
-      currency: "KES",
-      reference: `booking-${Date.now()}`,
-      phone: buyerForm.phone_number,
-      channels: ["mobile_money"],
-      onSuccess: async (response: any) => {
-        // Payment successful
-        try {
-          console.log("Paystack success response:", response);
-          // Check if farmer is still available
-          const { data: currentFarmer, error: farmerCheckError } = await supabase
-            .from("farmers")
-            .select("listing_status")
-            .eq("id", bookingFarmer.id)
-            .single();
 
-          if (farmerCheckError || !currentFarmer || currentFarmer.listing_status !== "available") {
-            console.error("Farmer not available:", farmerCheckError, currentFarmer);
-            toast.error("Farmer is no longer available");
-            setSubmitting(false);
-            return;
-          }
+    try {
+      const { data, error } = await supabase.functions.invoke("initialize-payment", {
+        body: {
+          farmer_id: bookingFarmer.id,
+          name: buyerForm.buyer_name.trim(),
+          phone: buyerForm.phone_number.trim(),
+          email: buyerForm.email.trim(),
+          county: buyerForm.county,
+          acres,
+        },
+      });
 
-          const { data: buyer, error: buyerError } = await supabase
-            .from("buyers")
-            .insert({
-              buyer_name: buyerForm.buyer_name,
-              phone_number: buyerForm.phone_number,
-              email: buyerForm.email,
-              county: buyerForm.county,
-            })
-            .select()
-            .single();
+      if (error || !data?.data?.access_code) {
+        const msg = (data as any)?.error || error?.message || "Failed to initialize payment";
+        setModalMessage({ type: "error", text: msg });
+        setSubmitting(false);
+        return;
+      }
 
-          if (buyerError || !buyer) {
-            console.error("Buyer insert error:", buyerError);
-            toast.error("Failed to register buyer after payment");
-            setSubmitting(false);
-            return;
-          }
-
-          console.log("Buyer created:", buyer.id);
-          const { error: bookingError } = await supabase
-            .from("bookings")
-            .insert({
-              buyer_id: buyer.id,
-              farmer_id: bookingFarmer.id,
-              acres_booked: acres,
-              payment_status: 'paid',
-            });
-
-          if (bookingError) {
-            console.error("Booking insert error:", bookingError);
-            toast.error("Booking failed after payment");
-            setSubmitting(false);
-            return;
-          }
-
-          console.log("Booking created successfully");
+      const { access_code, booking_ref } = data.data;
+      const PaystackPop = await loadPaystack();
+      const handler = PaystackPop.setup({
+        key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
+        email: buyerForm.email.trim(),
+        amount: Math.round(acres * 5000 * 100),
+        ref: booking_ref,
+        access_code,
+        onSuccess: () => {
           setSubmitting(false);
-          toast.success("Booking successful!");
           setBookingFarmer(null);
-          navigate("/payment-success", {
-            state: {
-              type: "booking",
-              buyerName: buyerForm.buyer_name,
-              farmerId: bookingFarmer.farmer_id,
-              acresBooked: buyerForm.acres_to_book,
-              amountPaid: amount,
-              reference: response.reference,
-            },
-          });
-        } catch (err) {
-          console.error("Unexpected error in onSuccess:", err);
-          toast.error("An unexpected error occurred");
+          setFieldErrors({});
+          setModalMessage(null);
+          setSuccessBanner("Booking confirmed! We will be in touch shortly.");
+          toast.success("Booking confirmed! We will be in touch shortly.");
+          queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
+        },
+        onCancel: () => {
           setSubmitting(false);
-        }
-      },
-      onError: (error: any) => {
-        console.error("Paystack error", error);
-        toast.error("Payment failed. Please try again.");
-        setSubmitting(false);
-      },
-      onClose: () => {
-        setSubmitting(false);
-      },
-    });
+          setModalMessage({ type: "info", text: "Payment cancelled. You can try again." });
+        },
+      });
+      handler.openIframe();
+    } catch (err: any) {
+      console.error(err);
+      setModalMessage({ type: "error", text: err?.message || "Something went wrong" });
+      setSubmitting(false);
+    }
   };
 
   const totalPrice = (parseFloat(buyerForm.acres_to_book) || 0) * 5000;
