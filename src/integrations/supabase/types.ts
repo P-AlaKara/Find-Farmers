@@ -19,6 +19,7 @@ export type Database = {
           acres_booked: number
           booking_status: Database["public"]["Enums"]["booking_status"]
           buyer_id: string
+          callback_url: string | null
           created_at: string
           farmer_id: string
           id: string
@@ -31,6 +32,7 @@ export type Database = {
           acres_booked: number
           booking_status?: Database["public"]["Enums"]["booking_status"]
           buyer_id: string
+          callback_url?: string | null
           created_at?: string
           farmer_id: string
           id?: string
@@ -43,6 +45,7 @@ export type Database = {
           acres_booked?: number
           booking_status?: Database["public"]["Enums"]["booking_status"]
           buyer_id?: string
+          callback_url?: string | null
           created_at?: string
           farmer_id?: string
           id?: string
