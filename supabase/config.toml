@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.external-book-farmer]
 verify_jwt = false
+
+[functions.external-booking-webhook]
+verify_jwt = false
