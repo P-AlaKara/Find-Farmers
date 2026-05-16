@@ -97,7 +97,6 @@ Deno.serve(async (req) => {
         farmer_id: farmer.id,
         acres_booked: acresNum,
         price_per_acre: 5000,
-        total_amount,
         payment_status: "pending",
         booking_status: "pending_approval",
       })
