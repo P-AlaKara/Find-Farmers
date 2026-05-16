@@ -104,6 +104,16 @@ Deno.serve(async (req) => {
       .single();
     if (bookingErr) throw bookingErr;
 
+    const paymentReference = booking.id.replace(/-/g, "");
+    const { error: refErr } = await supabase
+      .from("bookings")
+      .update({ payment_reference: paymentReference })
+      .eq("id", booking.id);
+    if (refErr) {
+      await supabase.from("bookings").delete().eq("id", booking.id);
+      throw refErr;
+    }
+
     // Lock farmer
     const { error: lockErr } = await supabase
       .from("farmers")
@@ -135,7 +145,7 @@ Deno.serve(async (req) => {
         email,
         amount: Math.round(total_amount * 100),
         currency: "KES",
-        reference: booking.id,
+        reference: paymentReference,
         metadata: { booking_id: booking.id, farmer_id: farmer.id },
       }),
     });
