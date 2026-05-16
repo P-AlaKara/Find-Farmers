@@ -145,7 +145,7 @@ Deno.serve(async (req) => {
         email,
         amount: Math.round(total_amount * 100),
         currency: "KES",
-        reference: booking.id,
+        reference: paymentReference,
         metadata: { booking_id: booking.id, farmer_id: farmer.id },
       }),
     });
