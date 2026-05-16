@@ -23,6 +23,7 @@ export type Database = {
           created_at: string
           farmer_id: string
           id: string
+          payment_reference: string | null
           payment_status: Database["public"]["Enums"]["payment_status"]
           price_per_acre: number
           total_amount: number | null
@@ -36,6 +37,7 @@ export type Database = {
           created_at?: string
           farmer_id: string
           id?: string
+          payment_reference?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
           price_per_acre?: number
           total_amount?: number | null
@@ -49,6 +51,7 @@ export type Database = {
           created_at?: string
           farmer_id?: string
           id?: string
+          payment_reference?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
           price_per_acre?: number
           total_amount?: number | null
