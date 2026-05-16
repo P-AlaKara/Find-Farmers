@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
     const { data: booking, error: lookupErr } = await supabase
       .from("bookings")
       .select("id, payment_status")
-      .eq("id", reference)
+      .eq("payment_reference", reference)
       .maybeSingle();
 
     if (lookupErr) throw lookupErr;
