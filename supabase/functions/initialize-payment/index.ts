@@ -134,6 +134,7 @@ Deno.serve(async (req) => {
       body: JSON.stringify({
         email,
         amount: Math.round(total_amount * 100),
+        currency: "KES",
         reference: booking.id,
         metadata: { booking_id: booking.id, farmer_id: farmer.id },
       }),
