@@ -71,16 +71,19 @@ Deno.serve(async (req) => {
     let buyerId: string | null = null;
     const { data: existingBuyer } = await supabase
       .from("buyers")
-      .select("id")
+      .select("id, account_status")
       .or(`email.eq.${email},phone_number.eq.${phone}`)
       .maybeSingle();
 
     if (existingBuyer) {
       buyerId = existingBuyer.id;
+      if (existingBuyer.account_status === "pending_setup") {
+        await supabase.from("buyers").update({ setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString() }).eq("id", existingBuyer.id);
+      }
     } else {
       const { data: newBuyer, error: buyerErr } = await supabase
         .from("buyers")
-        .insert({ buyer_name: name, phone_number: phone, email, county })
+        .insert({ buyer_name: name, phone_number: phone, email, county, setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString(), account_status: "pending_setup" })
         .select("id")
         .single();
       if (buyerErr) throw buyerErr;

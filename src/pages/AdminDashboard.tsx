@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { clearSession, getSession } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -14,6 +15,7 @@ import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { Sprout, Users, ShoppingCart, LogOut, CheckCircle, XCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
 import { format } from "date-fns";
+import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, LineChart, Line, ResponsiveContainer } from "recharts";
 import type { Tables as DbTables } from "@/integrations/supabase/types";
 import { HARVEST_DAYS } from "@/data/kenyaLocations";
 
@@ -33,13 +35,8 @@ const AdminDashboard = () => {
   const [buyerFormState, setBuyerFormState] = useState<any>({});
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { navigate("/admin/login"); return; }
-      const { data: isAdmin } = await supabase.rpc("has_role", { _user_id: session.user.id, _role: "admin" });
-      if (!isAdmin) navigate("/admin/login");
-    };
-    checkAuth();
+    const session = getSession();
+    if (!session || session.role !== "admin") navigate("/login");
   }, [navigate]);
 
   const { data: farmers = [] } = useQuery({
@@ -132,7 +129,7 @@ const AdminDashboard = () => {
     },
   });
 
-  const handleLogout = async () => { await supabase.auth.signOut(); navigate("/admin/login"); };
+  const handleLogout = async () => { clearSession(); navigate("/login"); };
 
   const openEditFarmer = (f: DbTables<"farmers">) => {
     setFarmerForm({ full_name: f.full_name, phone_number: f.phone_number, email: f.email || "", county: f.county, ward: f.ward, specific_location: f.specific_location, potato_variety: f.potato_variety, acreage_planted: f.acreage_planted });
@@ -237,12 +234,24 @@ const AdminDashboard = () => {
           </Card>
         </div>
 
-        <Tabs defaultValue="farmers">
+        <div className="mb-4 flex justify-end"><Button variant="outline" onClick={() => { queryClient.invalidateQueries({ queryKey: ["admin-farmers"] }); queryClient.invalidateQueries({ queryKey: ["admin-buyers"] }); queryClient.invalidateQueries({ queryKey: ["admin-bookings"] }); }}>Refresh</Button></div>
+
+        <Tabs defaultValue="analytics">
           <TabsList>
+            <TabsTrigger value="analytics">Analytics</TabsTrigger>
             <TabsTrigger value="farmers">Farmers ({farmers.length})</TabsTrigger>
             <TabsTrigger value="bookings">Bookings ({bookings.length})</TabsTrigger>
             <TabsTrigger value="buyers">Buyers ({buyers.length})</TabsTrigger>
           </TabsList>
+
+
+
+          <TabsContent value="analytics">
+            <div className="grid gap-4 lg:grid-cols-2">
+              <Card><CardHeader><CardTitle>Acreage by County</CardTitle></CardHeader><CardContent className="h-72"><ResponsiveContainer width="100%" height="100%"><BarChart data={Object.entries(farmers.reduce((a:any,f:any)=>{a[f.county]=(a[f.county]||0)+Number(f.acreage_planted||0);return a;},{})).map(([county,total])=>({county,total}))}><CartesianGrid strokeDasharray="3 3"/><XAxis dataKey="county"/><YAxis/><Tooltip/><Bar dataKey="total" fill="#3b82f6"/></BarChart></ResponsiveContainer></CardContent></Card>
+              <Card><CardHeader><CardTitle>Bookings by Status</CardTitle></CardHeader><CardContent className="h-72"><ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={Object.entries(bookings.reduce((a:any,b:any)=>{a[b.booking_status||'unknown']=(a[b.booking_status||'unknown']||0)+1;return a;},{})).map(([name,value])=>({name,value}))} dataKey="value" nameKey="name" outerRadius={90}>{[0,1,2,3].map((i)=><Cell key={i} fill={["#2563eb", "#16a34a", "#f59e0b", "#ef4444"][i%4]} />)}</Pie></PieChart></ResponsiveContainer></CardContent></Card>
+            </div>
+          </TabsContent>
 
           {/* Farmers Tab */}
           <TabsContent value="farmers">
