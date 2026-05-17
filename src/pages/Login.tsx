@@ -24,13 +24,13 @@ export default function Login() {
   };
 
   return (
-    <div className="container max-w-md py-12">
-      <Card className="shadow-lg">
-        <CardHeader className="flex flex-col items-center space-y-4 pt-8">
-          <img src="/logo.svg" alt="Farm Mall logo" className="h-32 w-32" />
+    <div className="container max-w-lg min-h-[80vh] flex items-center justify-center py-12">
+      <Card className="w-full shadow-lg">
+        <CardHeader className="flex flex-col items-center space-y-3 pt-8">
+          <img src="/logo.svg" alt="Farm Mall logo" className="h-16 w-16" />
           <CardTitle className="text-2xl text-center">Sign In</CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-8 pb-8">
           <form className="space-y-4" onSubmit={onSubmit}>
             <Input type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
             <Input type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
