@@ -14,6 +14,27 @@ export type Database = {
   }
   public: {
     Tables: {
+      admins: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          password_hash: string
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          password_hash: string
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          password_hash?: string
+        }
+        Relationships: []
+      }
       bookings: {
         Row: {
           acres_booked: number
@@ -76,28 +97,40 @@ export type Database = {
       }
       buyers: {
         Row: {
+          account_status: string
           buyer_name: string
           county: string
           created_at: string
           email: string
           id: string
+          password_hash: string | null
           phone_number: string
+          setup_token: string | null
+          setup_token_expires_at: string | null
         }
         Insert: {
+          account_status?: string
           buyer_name: string
           county: string
           created_at?: string
           email: string
           id?: string
+          password_hash?: string | null
           phone_number: string
+          setup_token?: string | null
+          setup_token_expires_at?: string | null
         }
         Update: {
+          account_status?: string
           buyer_name?: string
           county?: string
           created_at?: string
           email?: string
           id?: string
+          password_hash?: string | null
           phone_number?: string
+          setup_token?: string | null
+          setup_token_expires_at?: string | null
         }
         Relationships: []
       }
@@ -111,6 +144,7 @@ export type Database = {
           full_name: string
           id: string
           listing_status: Database["public"]["Enums"]["listing_status"]
+          password_hash: string | null
           payment_status: Database["public"]["Enums"]["payment_status"]
           phone_number: string
           planting_date: string
@@ -130,6 +164,7 @@ export type Database = {
           full_name: string
           id?: string
           listing_status?: Database["public"]["Enums"]["listing_status"]
+          password_hash?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
           phone_number: string
           planting_date: string
@@ -149,6 +184,7 @@ export type Database = {
           full_name?: string
           id?: string
           listing_status?: Database["public"]["Enums"]["listing_status"]
+          password_hash?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
           phone_number?: string
           planting_date?: string
