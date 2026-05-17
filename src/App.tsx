@@ -12,6 +12,8 @@ import NotFound from "./pages/NotFound";
 import Login from "./pages/Login";
 import SetupAccount from "./pages/SetupAccount";
 import FarmerDashboard from "./pages/FarmerDashboard";
+import BuyerBookings from "./pages/BuyerBookings";
+import BuyerSettings from "./pages/BuyerSettings";
 import ProtectedRoute from "./components/ProtectedRoute";
 
 const queryClient = new QueryClient();
@@ -27,6 +29,8 @@ const App = () => (
       <Route path="/setup-account" element={<SetupAccount />} />
       <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
       <Route path="/farmer/dashboard" element={<ProtectedRoute role="farmer"><FarmerDashboard /></ProtectedRoute>} />
+      <Route path="/buyer/bookings" element={<ProtectedRoute role="buyer"><BuyerBookings /></ProtectedRoute>} />
+      <Route path="/buyer/settings" element={<ProtectedRoute role="buyer"><BuyerSettings /></ProtectedRoute>} />
       <Route path="*" element={<NotFound />} />
     </Routes></HashRouter>
   </TooltipProvider></QueryClientProvider>
