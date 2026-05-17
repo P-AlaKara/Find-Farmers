@@ -23,13 +23,26 @@ export default function Login() {
     navigate(data.role === "admin" ? "/admin/dashboard" : data.role === "farmer" ? "/farmer/dashboard" : "/marketplace");
   };
 
-  return <div className="container max-w-md py-12"><Card><CardHeader><CardTitle>Sign In</CardTitle></CardHeader><CardContent>
-    <form className="space-y-4" onSubmit={onSubmit}>
-      <Input type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
-      <Input type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      <Button className="w-full">Sign In</Button>
-      <div className="text-sm space-y-1"><Link to="/register-farmer" className="underline block">Register as a farmer</Link><Link to="/setup-account" className="underline block">Complete account setup</Link></div>
-    </form>
-  </CardContent></Card></div>;
+  return (
+    <div className="container max-w-md py-12">
+      <Card className="shadow-lg">
+        <CardHeader className="flex flex-col items-center space-y-4 pt-8">
+          <img src="/logo.svg" alt="Farm Mall logo" className="h-32 w-32" />
+          <CardTitle className="text-2xl text-center">Sign In</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form className="space-y-4" onSubmit={onSubmit}>
+            <Input type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
+            <Input type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
+            {error && <p className="text-sm text-red-500">{error}</p>}
+            <Button className="w-full">Sign In</Button>
+            <div className="text-sm space-y-1 text-center">
+              <Link to="/register-farmer" className="underline block">Register as a farmer</Link>
+              <Link to="/setup-account" className="underline block">Complete account setup</Link>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
