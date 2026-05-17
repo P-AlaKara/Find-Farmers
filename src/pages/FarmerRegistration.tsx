@@ -25,6 +25,8 @@ const FarmerRegistration = () => {
     potato_variety: "",
     acreage_planted: "",
     planting_date: "",
+    password: "",
+    confirm_password: "",
   });
 
   const wards = form.county ? KENYA_COUNTIES[form.county] || [] : [];
@@ -60,14 +62,18 @@ const FarmerRegistration = () => {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.full_name || !form.phone_number || !form.county || !form.ward || !form.specific_location || !form.potato_variety || !form.acreage_planted || !form.planting_date) {
+    if (!form.full_name || !form.phone_number || !form.county || !form.ward || !form.specific_location || !form.potato_variety || !form.acreage_planted || !form.planting_date || !form.password || !form.confirm_password) {
       toast.error("Please fill in all required fields");
+      return;
+    }
+    if (form.password !== form.confirm_password) {
+      toast.error("Passwords do not match");
       return;
     }
 
     if (starterAccess) {
       setLoading(true);
-      const { error } = await supabase.from("farmers").insert({
+      const { error } = await supabase.functions.invoke("api-auth/register-farmer", { body: {
         full_name: form.full_name,
         phone_number: form.phone_number,
         email: form.email || null,
@@ -77,8 +83,8 @@ const FarmerRegistration = () => {
         potato_variety: form.potato_variety,
         acreage_planted: acreage,
         planting_date: form.planting_date,
-        payment_status: 'promo_code',
-      });
+        payment_status: 'promo_code', password: form.password
+      }});
       setLoading(false);
 
       if (error) {
@@ -104,7 +110,7 @@ const FarmerRegistration = () => {
         onSuccess: async (response: any) => {
           // Payment successful
           try {
-            const { error } = await supabase.from("farmers").insert({
+            const { error } = await supabase.functions.invoke("api-auth/register-farmer", { body: {
               full_name: form.full_name,
               phone_number: form.phone_number,
               email: form.email || null,
@@ -114,8 +120,8 @@ const FarmerRegistration = () => {
               potato_variety: form.potato_variety,
               acreage_planted: acreage,
               planting_date: form.planting_date,
-              payment_status: 'paid',
-            });
+              payment_status: 'paid', password: form.password
+            }});
 
             if (error) {
               toast.error("Registration failed. Please try again.");
@@ -174,8 +180,13 @@ const FarmerRegistration = () => {
               </div>
 
               <div className="space-y-2">
-                <Label>Email (Optional)</Label>
-                <Input type="email" value={form.email} onChange={(e) => handleChange("email", e.target.value)} placeholder="farmer@email.com" />
+                <Label>Email *</Label>
+                <Input type="email" value={form.email} onChange={(e) => handleChange("email", e.target.value)} placeholder="farmer@email.com" required />
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2"><Label>Password *</Label><Input type="password" value={form.password} onChange={(e)=>handleChange("password", e.target.value)} required /></div>
+                <div className="space-y-2"><Label>Confirm Password *</Label><Input type="password" value={form.confirm_password} onChange={(e)=>handleChange("confirm_password", e.target.value)} required /></div>
+              </div>
+
               </div>
 
               <div className="grid gap-4 sm:grid-cols-2">
