@@ -1,5 +1,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { sendEmail } from "../_shared/resend.js";
+
+const formatMpesaPhone = (phone: string) => {
+  const cleaned = phone.replace(/[\s\-()]/g, "");
+  if (cleaned.startsWith("+254")) return cleaned.slice(1);
+  if (cleaned.startsWith("0")) return `254${cleaned.slice(1)}`;
+  return cleaned;
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -84,10 +92,29 @@ Deno.serve(async (req) => {
       const { data: newBuyer, error: buyerErr } = await supabase
         .from("buyers")
         .insert({ buyer_name: name, phone_number: phone, email, county, setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString(), account_status: "pending_setup" })
-        .select("id")
+        .select("id, setup_token")
         .single();
       if (buyerErr) throw buyerErr;
       buyerId = newBuyer.id;
+      const appBaseUrl = Deno.env.get("APP_BASE_URL") || "http://localhost:5173";
+      const setupLink = `${appBaseUrl}/setup-account?token=${encodeURIComponent(newBuyer.setup_token)}`;
+      const html = `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;">
+          <div style="background:#166534;color:#fff;padding:16px;font-size:20px;font-weight:700;">PotatoMarket Kenya</div>
+          <div style="padding:20px;color:#111827;">
+            <p>Hello ${name},</p>
+            <p>Your booking was successful and your account has been created.</p>
+            <p><a href="${setupLink}" style="display:inline-block;background:#166534;color:#fff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:600;">Complete Account Setup</a></p>
+            <p>This link expires in 24 hours.</p>
+            <p>If the link expires, request a new one at:<br/><a href="${appBaseUrl}/setup-account">${appBaseUrl}/setup-account</a></p>
+          </div>
+          <div style="padding:16px;color:#6b7280;border-top:1px solid #e5e7eb;">© PotatoMarket Kenya</div>
+        </div>`;
+      try {
+        await sendEmail(email, "Complete your PotatoMarket Kenya account setup", html);
+      } catch (emailErr) {
+        console.error("Buyer setup email wrapper error:", emailErr);
+      }
     }
 
     const total_amount = acresNum * 5000;
@@ -127,7 +154,7 @@ Deno.serve(async (req) => {
       throw lockErr;
     }
 
-    // Initialize Paystack
+    // Charge via Paystack M-Pesa
     const paystackKey = Deno.env.get("PAYSTACK_SECRET_KEY");
     if (!paystackKey) {
       await supabase.from("bookings").delete().eq("id", booking.id);
@@ -138,7 +165,8 @@ Deno.serve(async (req) => {
       });
     }
 
-    const psRes = await fetch("https://api.paystack.co/transaction/initialize", {
+    const formattedPhone = formatMpesaPhone(phone);
+    const psRes = await fetch("https://api.paystack.co/charge", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${paystackKey}`,
@@ -148,18 +176,21 @@ Deno.serve(async (req) => {
         email,
         amount: Math.round(total_amount * 100),
         currency: "KES",
+        mobile_money: {
+          phone: formattedPhone,
+          provider: "mpesa",
+        },
         reference: paymentReference,
         metadata: { booking_id: booking.id, farmer_id: farmer.id },
-        channels: ["mobile_money"],
       }),
     });
 
     const psJson = await psRes.json().catch(() => ({}));
-    if (!psRes.ok || !psJson?.status || !psJson?.data?.authorization_url) {
+    if (!psRes.ok || !psJson?.status) {
       await supabase.from("bookings").delete().eq("id", booking.id);
       await supabase.from("farmers").update({ listing_status: "available" }).eq("id", farmer.id);
       return new Response(
-        JSON.stringify({ error: psJson?.message || "Failed to initialize payment", paystack_status: psRes.status }),
+        JSON.stringify({ error: psJson?.message || "Failed to initialize M-Pesa charge", paystack_status: psRes.status }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -168,10 +199,9 @@ Deno.serve(async (req) => {
       JSON.stringify({
         status: 200,
         data: {
-          payment_url: psJson.data.authorization_url,
-          access_code: psJson.data.access_code,
           booking_ref: booking.id,
-          payment_reference: paymentReference,
+          reference: paymentReference,
+          message: `An M-Pesa payment prompt has been sent to ${formattedPhone}. Please enter your PIN to complete the booking.`,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },

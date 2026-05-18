@@ -15,6 +15,12 @@ const json = (status: number, body: unknown) =>
 const isValidUrl = (s: string) => {
   try { new URL(s); return true; } catch { return false; }
 };
+const formatMpesaPhone = (phone: string) => {
+  const cleaned = phone.replace(/[\s\-()]/g, "");
+  if (cleaned.startsWith("+254")) return cleaned.slice(1);
+  if (cleaned.startsWith("0")) return `254${cleaned.slice(1)}`;
+  return cleaned;
+};
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -131,7 +137,7 @@ Deno.serve(async (req) => {
       return json(500, { status: 500, message: "Failed to reserve farmer listing" });
     }
 
-    // 6. Initialize Paystack
+    // 6. Charge via Paystack M-Pesa
     const paystackKey = Deno.env.get("PAYSTACK_SECRET_KEY");
     if (!paystackKey) {
       await supabase.from("bookings").delete().eq("id", booking.id);
@@ -140,7 +146,15 @@ Deno.serve(async (req) => {
     }
 
     try {
-      const paystackRes = await fetch("https://api.paystack.co/transaction/initialize", {
+      const reference = booking.id.replace(/-/g, "");
+      const formattedPhone = formatMpesaPhone(phone);
+      const { error: refErr } = await supabase
+        .from("bookings")
+        .update({ payment_reference: reference })
+        .eq("id", booking.id);
+      if (refErr) throw new Error("Failed to store payment reference");
+
+      const paystackRes = await fetch("https://api.paystack.co/charge", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${paystackKey}`,
@@ -149,21 +163,27 @@ Deno.serve(async (req) => {
         body: JSON.stringify({
           amount: Math.round(total_amount * 100),
           email,
-          reference: booking.id,
-          callback_url,
+          currency: "KES",
+          mobile_money: {
+            phone: formattedPhone,
+            provider: "mpesa",
+          },
+          reference,
           metadata: { booking_id: booking.id, farmer_id: farmer.id },
         }),
       });
       const paystackJson = await paystackRes.json();
-      if (!paystackRes.ok || !paystackJson?.status || !paystackJson?.data?.authorization_url) {
-        throw new Error(paystackJson?.message || "Paystack initialization failed");
+      if (!paystackRes.ok || !paystackJson?.status) {
+        throw new Error(paystackJson?.message || "Paystack charge failed");
       }
 
       return json(200, {
         status: 200,
         data: {
-          payment_url: paystackJson.data.authorization_url,
           booking_ref: booking.id,
+          reference,
+          message: `An M-Pesa payment prompt has been sent to ${formattedPhone}. The customer should enter their PIN to complete payment.`,
+          payment_method: "mpesa",
         },
       });
     } catch (payErr) {

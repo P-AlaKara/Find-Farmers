@@ -13,33 +13,8 @@ import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { KENYA_COUNTIES, POTATO_VARIETIES, HARVEST_DAYS } from "@/data/kenyaLocations";
-import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2 } from "lucide-react";
+import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2, Smartphone } from "lucide-react";
 import { format, addDays } from "date-fns";
-
-declare global {
-  interface Window {
-    PaystackPop?: any;
-  }
-}
-
-const PAYSTACK_INLINE_SRC = "https://js.paystack.co/v1/inline.js";
-const loadPaystack = (): Promise<any> =>
-  new Promise((resolve, reject) => {
-    if (typeof window === "undefined") return reject(new Error("No window"));
-    if (window.PaystackPop) return resolve(window.PaystackPop);
-    const existing = document.querySelector(`script[src="${PAYSTACK_INLINE_SRC}"]`) as HTMLScriptElement | null;
-    if (existing) {
-      existing.addEventListener("load", () => resolve(window.PaystackPop));
-      existing.addEventListener("error", () => reject(new Error("Failed to load Paystack")));
-      return;
-    }
-    const s = document.createElement("script");
-    s.src = PAYSTACK_INLINE_SRC;
-    s.async = true;
-    s.onload = () => resolve(window.PaystackPop);
-    s.onerror = () => reject(new Error("Failed to load Paystack"));
-    document.head.appendChild(s);
-  });
 
 const getEstimatedHarvest = (plantingDate: string, variety: string) => {
   const days = HARVEST_DAYS[variety] || 100;
@@ -64,6 +39,7 @@ const Marketplace = () => {
   const [submitting, setSubmitting] = useState(false);
   const [modalMessage, setModalMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
+  const [paymentOverlay, setPaymentOverlay] = useState<{ reference: string; bookingRef: string; message: string; paid: boolean; timeout: boolean } | null>(null);
 
   const { data: farmers = [], isLoading } = useQuery({
     queryKey: ["marketplace-farmers"],
@@ -140,37 +116,38 @@ const Marketplace = () => {
         },
       });
 
-      if (error || !data?.data?.access_code) {
+      if (error || !data?.data?.reference) {
         const msg = (data as any)?.error || error?.message || "Failed to initialize payment";
         setModalMessage({ type: "error", text: msg });
         setSubmitting(false);
         return;
       }
 
-      const { access_code, booking_ref, payment_reference } = data.data;
-      const PaystackPop = await loadPaystack();
-      const handler = PaystackPop.setup({
-        key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
-        email: buyerForm.email.trim(),
-        amount: Math.round(acres * 5000 * 100),
-        ref: payment_reference || booking_ref,
-        channels: ["mobile_money"],
-        access_code,
-        onSuccess: () => {
-          setSubmitting(false);
-          setBookingFarmer(null);
-          setFieldErrors({});
-          setModalMessage(null);
+      const { reference, booking_ref, message } = data.data;
+      setSubmitting(false);
+      setBookingFarmer(null);
+      setFieldErrors({});
+      setModalMessage(null);
+      setPaymentOverlay({ reference, bookingRef: booking_ref, message, paid: false, timeout: false });
+
+      let attempts = 0;
+      const maxAttempts = 75;
+      const intervalId = window.setInterval(async () => {
+        attempts += 1;
+        const { data: statusData, error: statusError } = await supabase.functions.invoke(`booking-status?reference=${reference}`, {
+          method: "GET",
+        });
+        if (!statusError && statusData?.data?.payment_status === "paid") {
+          window.clearInterval(intervalId);
+          setPaymentOverlay((prev) => prev ? { ...prev, paid: true } : prev);
           setSuccessBanner("Booking confirmed! We will be in touch shortly.");
           toast.success("Booking confirmed! We will be in touch shortly.");
           queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
-        },
-        onCancel: () => {
-          setSubmitting(false);
-          setModalMessage({ type: "info", text: "Payment cancelled. You can try again." });
-        },
+        } else if (attempts >= maxAttempts) {
+          window.clearInterval(intervalId);
+          setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
+        }
       });
-      handler.openIframe();
     } catch (err: any) {
       console.error(err);
       setModalMessage({ type: "error", text: err?.message || "Something went wrong" });
@@ -332,6 +309,7 @@ const Marketplace = () => {
             <div className="space-y-2">
               <Label>Phone Number *</Label>
               <Input value={buyerForm.phone_number} onChange={(e) => setBuyerForm((p) => ({ ...p, phone_number: e.target.value }))} />
+              <p className="text-xs text-muted-foreground">This number will receive an M-Pesa payment prompt. Ensure it is M-Pesa enabled.</p>
               {fieldErrors.phone_number && <p className="text-xs text-destructive">{fieldErrors.phone_number}</p>}
             </div>
             <div className="space-y-2">
@@ -368,11 +346,40 @@ const Marketplace = () => {
             )}
 
             <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>) : "Pay with Paystack"}
+              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>) : "Request M-Pesa Prompt"}
             </Button>
           </form>
         </DialogContent>
       </Dialog>
+      {paymentOverlay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6">
+          <div className="w-full max-w-lg rounded-xl border bg-card p-8 text-center shadow-lg">
+            {!paymentOverlay.paid ? (
+              <>
+                <Smartphone className="mx-auto mb-4 h-14 w-14 text-primary" />
+                <h2 className="mb-2 text-2xl font-bold">Check your phone</h2>
+                <p className="mb-3 text-muted-foreground">{paymentOverlay.message}</p>
+                <p className="mb-3 text-sm font-medium">Do not close this window</p>
+                <p className="text-sm text-destructive">⚠️ Once you enter your PIN, the payment cannot be cancelled or refunded.</p>
+                {paymentOverlay.timeout && (
+                  <div className="mt-6">
+                    <p className="mb-4 text-sm text-muted-foreground">This is taking longer than expected. If you completed the M-Pesa payment, your booking will be confirmed shortly. You can safely close this window.</p>
+                    <Button onClick={() => setPaymentOverlay(null)}>Close</Button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="mx-auto mb-4 h-14 w-14 text-green-600" />
+                <h2 className="mb-2 text-2xl font-bold text-green-700">Booking Confirmed!</h2>
+                <p className="mb-2 text-muted-foreground">Your farmer has been successfully booked.</p>
+                <p className="mb-6 text-sm font-medium">Booking Ref: {paymentOverlay.bookingRef}</p>
+                <Button onClick={() => setPaymentOverlay(null)}>Close</Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
