@@ -20,6 +20,7 @@ export default function FarmerSettings() {
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<Profile>({ full_name: "", phone_number: "", email: "", county: "", ward: "", specific_location: "", potato_variety: "", acreage_planted: "" });
   const [pMsg, setPMsg] = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [pSaving, setPSaving] = useState(false);
 
   const [pw, setPw] = useState({ current_password: "", new_password: "", confirm_password: "" });
@@ -29,12 +30,17 @@ export default function FarmerSettings() {
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { data } = await supabase.from("farmers").select("full_name, phone_number, email, county, ward, specific_location, potato_variety, acreage_planted").eq("id", session.userId).maybeSingle();
-      if (data) setProfile({
-        full_name: data.full_name ?? "", phone_number: data.phone_number ?? "", email: data.email ?? "",
-        county: data.county ?? "", ward: data.ward ?? "", specific_location: data.specific_location ?? "",
-        potato_variety: data.potato_variety ?? "", acreage_planted: data.acreage_planted ?? "",
-      });
+      const { data, error } = await supabase.functions.invoke("api-auth/farmer/profile/get", { body: { farmer_id: session.userId } });
+      if (error || data?.error || !data?.data) {
+        setLoadErr(data?.error || error?.message || "Could not load profile.");
+      } else {
+        const profileData = data.data;
+        setProfile({
+          full_name: profileData.full_name ?? "", phone_number: profileData.phone_number ?? "", email: profileData.email ?? "",
+          county: profileData.county ?? "", ward: profileData.ward ?? "", specific_location: profileData.specific_location ?? "",
+          potato_variety: profileData.potato_variety ?? "", acreage_planted: profileData.acreage_planted ?? "",
+        });
+      }
       setLoading(false);
     })();
   }, [session]);
@@ -74,6 +80,7 @@ export default function FarmerSettings() {
   };
 
   if (loading) return <div className="container max-w-2xl py-8"><p className="text-muted-foreground">Loading…</p></div>;
+  if (loadErr) return <div className="container max-w-2xl py-8"><p className="text-red-500">{loadErr}</p></div>;
 
   return (
     <div className="container max-w-2xl py-8 space-y-6">
