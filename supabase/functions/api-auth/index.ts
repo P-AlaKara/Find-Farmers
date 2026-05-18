@@ -1,5 +1,6 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import bcrypt from "npm:bcryptjs@2.4.3";
+import { sendEmail } from "../_shared/resend.js";
 
 const hash = (s: string, r: number) => bcrypt.hash(s, r);
 const compare = (s: string, h: string) => bcrypt.compare(s, h);
@@ -152,8 +153,28 @@ if (path === "/farmer/profile" && req.method === "GET") {
   if (path === "/admin/farmer/update" && req.method === "POST") {
     const { admin_id, id, updates } = await req.json();
     if (!(await isAdmin(db, admin_id))) return j({ error: "Unauthorized" }, 403);
+    const { data: before } = await db.from("farmers").select("registration_status, full_name, email").eq("id", id).maybeSingle();
     const { error } = await db.from("farmers").update(updates).eq("id", id);
     if (error) return j({ error: error.message }, 400);
+    if (before?.registration_status !== "approved" && updates?.registration_status === "approved" && before?.email) {
+      const appBaseUrl = Deno.env.get("APP_BASE_URL") || "http://localhost:5173";
+      const html = `
+        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;">
+          <div style="background:#166534;color:#fff;padding:16px;font-size:20px;font-weight:700;">PotatoMarket Kenya</div>
+          <div style="padding:20px;color:#111827;">
+            <p>Hello ${before.full_name || "Farmer"},</p>
+            <p>Congratulations! Your PotatoMarket Kenya account has been approved.</p>
+            <p>Your listing is now visible to buyers.</p>
+            <p><a href="${appBaseUrl}/login" style="display:inline-block;background:#166534;color:#fff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:600;">Log in to your account</a></p>
+          </div>
+          <div style="padding:16px;color:#6b7280;border-top:1px solid #e5e7eb;">© PotatoMarket Kenya</div>
+        </div>`;
+      try {
+        await sendEmail(before.email, "Your PotatoMarket Kenya account has been approved", html);
+      } catch (emailErr) {
+        console.error("Farmer approved email wrapper error:", emailErr);
+      }
+    }
     return j({ ok: true });
   }
 

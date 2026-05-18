@@ -74,7 +74,7 @@ Deno.serve(async (req) => {
     const { data: booking, error: bookingErr } = await supabase
       .from("bookings")
       .select("id, farmer_id, buyer_id, acres_booked, total_amount, payment_status, callback_url")
-      .eq("id", reference)
+      .eq("payment_reference", reference)
       .maybeSingle();
 
     if (bookingErr) {
