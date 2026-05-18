@@ -38,7 +38,7 @@ Deno.serve(async (req) => {
     if (farmer?.password_hash && await compare(password, farmer.password_hash)) return j({ token: gen(), role: "farmer", userId: farmer.id, email: farmer.email });
 
     const { data: buyer } = await db.from("buyers").select("id,email,password_hash,account_status").eq("email", email).maybeSingle();
-    if (buyer?.account_status === "pending_setup") return j({ error: "Please complete your account setup via the link sent to your WhatsApp." }, 401);
+    if (buyer?.account_status === "pending_setup" && !buyer?.password_hash) return j({ error: "Please complete your account setup via the link sent to your WhatsApp." }, 401);
     if (buyer?.password_hash && await compare(password, buyer.password_hash)) return j({ token: gen(), role: "buyer", userId: buyer.id, email: buyer.email });
     return j({ error: "Invalid email or password" }, 401);
   }
@@ -62,6 +62,38 @@ Deno.serve(async (req) => {
     const { data } = await db.from("buyers").select("id").eq("setup_token", token).gt("setup_token_expires_at", new Date().toISOString()).maybeSingle();
     if (!data) return j({ error: "This link has expired." }, 400);
     await db.from("buyers").update({ password_hash: await hash(password, 10), account_status: "active", setup_token: null, setup_token_expires_at: null }).eq("id", data.id);
+    return j({ ok: true });
+  }
+
+
+  if (path === "/register-buyer" && req.method === "POST") {
+    const { buyer_name, phone_number, email, county, password, confirm_password } = await req.json();
+    const name = String(buyer_name || "").trim();
+    const phone = String(phone_number || "").trim();
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const countyName = String(county || "").trim();
+    const pwd = String(password || "");
+
+    if (!name || !phone || !normalizedEmail || !countyName || !pwd || !confirm_password) return j({ error: "Missing required fields" }, 400);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return j({ error: "Invalid email" }, 400);
+    if (pwd.length < 8) return j({ error: "Password must be at least 8 characters" }, 400);
+    if (pwd !== String(confirm_password)) return j({ error: "Passwords do not match" }, 400);
+
+    const { data: existing } = await db.from("buyers").select("id").eq("email", normalizedEmail).maybeSingle();
+    if (existing) return j({ error: "An account with this email already exists" }, 409);
+
+    const { error } = await db.from("buyers").insert({
+      buyer_name: name,
+      phone_number: phone,
+      email: normalizedEmail,
+      county: countyName,
+      password_hash: await hash(pwd, 10),
+      account_status: "active",
+      setup_token: null,
+      setup_token_expires_at: null,
+    });
+
+    if (error) return j({ error: error.message }, 400);
     return j({ ok: true });
   }
 
