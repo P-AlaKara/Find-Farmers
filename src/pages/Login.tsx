@@ -38,7 +38,8 @@ export default function Login() {
             <Button className="w-full">Sign In</Button>
             <div className="text-sm space-y-1 text-center">
               <Link to="/register-farmer" className="underline block">Register as a farmer</Link>
-              <Link to="/setup-account" className="underline block">Complete account setup</Link>
+              <Link to="/register-buyer" className="underline block">Register as a buyer</Link>
+              <Link to="/setup-account" className="underline block">Complete account setup (existing invited buyers)</Link>
             </div>
           </form>
         </CardContent>

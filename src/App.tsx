@@ -6,6 +6,7 @@ import { HashRouter, Routes, Route } from "react-router-dom";
 import Home from "./pages/Home";
 import Marketplace from "./pages/Marketplace";
 import FarmerRegistration from "./pages/FarmerRegistration";
+import BuyerRegistration from "./pages/BuyerRegistration";
 import AdminDashboard from "./pages/AdminDashboard";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import NotFound from "./pages/NotFound";
@@ -25,6 +26,7 @@ const App = () => (
       <Route path="/" element={<Home />} />
       <Route path="/marketplace" element={<Marketplace />} />
       <Route path="/register-farmer" element={<FarmerRegistration />} />
+      <Route path="/register-buyer" element={<BuyerRegistration />} />
       <Route path="/payment-success" element={<PaymentSuccess />} />
       <Route path="/login" element={<Login />} />
       <Route path="/setup-account" element={<SetupAccount />} />
