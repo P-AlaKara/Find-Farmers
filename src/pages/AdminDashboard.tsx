@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { clearSession, getSession } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -33,6 +33,9 @@ const AdminDashboard = () => {
   const [editingBuyer, setEditingBuyer] = useState<DbTables<"buyers"> | null>(null);
   const [farmerForm, setFarmerForm] = useState<any>({});
   const [buyerFormState, setBuyerFormState] = useState<any>({});
+  const [farmerFilters, setFarmerFilters] = useState({ search: "", status: "all", county: "all" });
+  const [bookingFilters, setBookingFilters] = useState({ search: "", status: "all", payment: "all" });
+  const [buyerFilters, setBuyerFilters] = useState({ search: "", county: "all" });
 
   useEffect(() => {
     const session = getSession();
@@ -42,68 +45,67 @@ const AdminDashboard = () => {
   const { data: farmers = [] } = useQuery({
     queryKey: ["admin-farmers"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("farmers").select("*").order("created_at", { ascending: false });
-      if (error) throw error;
-      return data as DbTables<"farmers">[];
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/farmers", { body: { admin_id: session?.userId } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+      return (data?.data || []) as DbTables<"farmers">[];
     },
   });
 
   const { data: buyers = [] } = useQuery({
     queryKey: ["admin-buyers"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("buyers").select("*").order("created_at", { ascending: false });
-      if (error) throw error;
-      return data as DbTables<"buyers">[];
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/buyers", { body: { admin_id: session?.userId } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+      return (data?.data || []) as DbTables<"buyers">[];
     },
   });
 
   const { data: bookings = [] } = useQuery({
     queryKey: ["admin-bookings"],
     queryFn: async () => {
-      const { data, error } = await supabase.from("bookings").select("*, buyers(*), farmers(*)").order("created_at", { ascending: false });
-      if (error) throw error;
-      return data;
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/bookings", { body: { admin_id: session?.userId } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+      return data?.data || [];
     },
   });
 
   const updateFarmer = useMutation({
     mutationFn: async ({ id, updates }: { id: string; updates: Partial<DbTables<"farmers">> }) => {
-      const { error } = await supabase.from("farmers").update(updates).eq("id", id);
-      if (error) throw error;
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/farmer/update", { body: { admin_id: session?.userId, id, updates } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["admin-farmers"] }); toast.success("Farmer updated"); },
   });
 
   const deleteFarmer = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("farmers").delete().eq("id", id);
-      if (error) throw error;
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/farmer/delete", { body: { admin_id: session?.userId, id } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["admin-farmers"] }); toast.success("Farmer deleted"); },
   });
 
   const deleteBuyer = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.from("buyers").delete().eq("id", id);
-      if (error) throw error;
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/buyer/delete", { body: { admin_id: session?.userId, id } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["admin-buyers"] }); toast.success("Buyer deleted"); },
   });
 
   const updateBooking = useMutation({
-    mutationFn: async ({ id, farmerId, status, booking }: { id: string; farmerId: string; status: "approved" | "rejected"; booking?: any }) => {
-      const { error: bookingErr } = await supabase.from("bookings").update({
-        booking_status: status,
-        payment_status: status === "approved" ? "paid" : "rejected",
-      }).eq("id", id);
-      if (bookingErr) throw bookingErr;
+    mutationFn: async ({ id, farmerId, status, booking }: { id: string; farmerId: string; status: "confirmed" | "rejected"; booking?: any }) => {
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/booking/update", { body: { admin_id: session?.userId, id, farmerId, status } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
 
-      const { error: farmerErr } = await supabase.from("farmers").update({
-        listing_status: status === "approved" ? "booked" : "available",
-      }).eq("id", farmerId);
-      if (farmerErr) throw farmerErr;
-
-      if (status === "approved" && booking) {
+      if (status === "confirmed" && booking) {
         try {
           await supabase.functions.invoke("send-booking-email", {
             body: {
@@ -118,7 +120,7 @@ const AdminDashboard = () => {
           });
         } catch (emailErr) {
           console.error("Email notification failed:", emailErr);
-          toast.error("Booking approved but email notification failed");
+          toast.error("Booking confirmed but email notification failed");
         }
       }
     },
@@ -149,12 +151,36 @@ const AdminDashboard = () => {
 
   const saveEditBuyer = async () => {
     if (!editingBuyer) return;
-    const { error } = await supabase.from("buyers").update(buyerFormState).eq("id", editingBuyer.id);
-    if (error) { toast.error("Failed to update buyer"); return; }
+    const session = getSession();
+    const { data, error } = await supabase.functions.invoke("api-auth/admin/buyer/update", { body: { admin_id: session?.userId, id: editingBuyer.id, updates: buyerFormState } });
+    if (error || data?.error) { toast.error(data?.error || "Failed to update buyer"); return; }
     queryClient.invalidateQueries({ queryKey: ["admin-buyers"] });
     toast.success("Buyer updated");
     setEditingBuyer(null);
   };
+
+  const filteredFarmers = useMemo(() => farmers.filter((f) => {
+    const q = farmerFilters.search.trim().toLowerCase();
+    if (q && !(f.farmer_id?.toLowerCase().includes(q) || f.full_name?.toLowerCase().includes(q) || f.phone_number?.toLowerCase().includes(q))) return false;
+    if (farmerFilters.status !== "all" && f.registration_status !== farmerFilters.status) return false;
+    if (farmerFilters.county !== "all" && f.county !== farmerFilters.county) return false;
+    return true;
+  }), [farmers, farmerFilters]);
+
+  const filteredBookings = useMemo(() => bookings.filter((b: any) => {
+    const q = bookingFilters.search.trim().toLowerCase();
+    if (q && !(String(b.id).toLowerCase().includes(q) || String(b.farmers?.farmer_id || "").toLowerCase().includes(q) || String(b.buyers?.buyer_name || "").toLowerCase().includes(q))) return false;
+    if (bookingFilters.status !== "all" && b.booking_status !== bookingFilters.status) return false;
+    if (bookingFilters.payment !== "all" && b.payment_status !== bookingFilters.payment) return false;
+    return true;
+  }), [bookings, bookingFilters]);
+
+  const filteredBuyers = useMemo(() => buyers.filter((b) => {
+    const q = buyerFilters.search.trim().toLowerCase();
+    if (q && !(String(b.buyer_name || "").toLowerCase().includes(q) || String(b.phone_number || "").toLowerCase().includes(q) || String(b.email || "").toLowerCase().includes(q))) return false;
+    if (buyerFilters.county !== "all" && b.county !== buyerFilters.county) return false;
+    return true;
+  }), [buyers, buyerFilters]);
 
   const pendingFarmers = farmers.filter((f) => f.registration_status === "pending").length;
   const pendingBookings = bookings.filter((b: any) => b.booking_status === "pending_approval").length;
@@ -164,7 +190,7 @@ const AdminDashboard = () => {
     .filter((f) => f.payment_status === "paid")
     .reduce((sum, f) => sum + (f.registration_fee || 0), 0);
   const buyerRevenue = bookings
-    .filter((b: any) => b.booking_status === "approved")
+    .filter((b: any) => b.booking_status === "confirmed")
     .reduce((sum: number, b: any) => sum + (b.total_amount || 0), 0);
   const totalRevenue = farmerRevenue + buyerRevenue;
 
@@ -239,9 +265,9 @@ const AdminDashboard = () => {
         <Tabs defaultValue="analytics">
           <TabsList>
             <TabsTrigger value="analytics">Analytics</TabsTrigger>
-            <TabsTrigger value="farmers">Farmers ({farmers.length})</TabsTrigger>
-            <TabsTrigger value="bookings">Bookings ({bookings.length})</TabsTrigger>
-            <TabsTrigger value="buyers">Buyers ({buyers.length})</TabsTrigger>
+            <TabsTrigger value="farmers">Farmers ({filteredFarmers.length}/{farmers.length})</TabsTrigger>
+            <TabsTrigger value="bookings">Bookings ({filteredBookings.length}/{bookings.length})</TabsTrigger>
+            <TabsTrigger value="buyers">Buyers ({filteredBuyers.length}/{buyers.length})</TabsTrigger>
           </TabsList>
 
 
@@ -255,6 +281,11 @@ const AdminDashboard = () => {
 
           {/* Farmers Tab */}
           <TabsContent value="farmers">
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Input className="w-64" placeholder="Search farmer ID/name/phone" value={farmerFilters.search} onChange={(e)=>setFarmerFilters((p)=>({...p, search:e.target.value}))} />
+              <Select value={farmerFilters.status} onValueChange={(v)=>setFarmerFilters((p)=>({...p,status:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="rejected">Rejected</SelectItem></SelectContent></Select>
+              <Select value={farmerFilters.county} onValueChange={(v)=>setFarmerFilters((p)=>({...p,county:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="County" /></SelectTrigger><SelectContent><SelectItem value="all">All counties</SelectItem>{Array.from(new Set(farmers.map(f=>f.county).filter(Boolean))).map((c)=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+            </div>
             <div className="rounded-lg border overflow-x-auto max-h-[500px] overflow-y-auto">
               <Table>
                 <TableHeader>
@@ -274,7 +305,7 @@ const AdminDashboard = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {farmers.map((f) => (
+                  {filteredFarmers.map((f) => (
                     <TableRow key={f.id}>
                       <TableCell className="font-mono text-xs">{f.farmer_id}</TableCell>
                       <TableCell>{f.full_name}</TableCell>
@@ -309,7 +340,7 @@ const AdminDashboard = () => {
                           {f.registration_status === "pending" && (
                             <>
                               <Button size="sm" variant="default" className="h-7 text-xs" onClick={() => updateFarmer.mutate({ id: f.id, updates: { registration_status: "approved", listing_status: "available" } })}>
-                                <CheckCircle className="mr-1 h-3 w-3" /> Approve
+                                <CheckCircle className="mr-1 h-3 w-3" /> Confirm
                               </Button>
                               <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => updateFarmer.mutate({ id: f.id, updates: { registration_status: "rejected" } })}>
                                 <XCircle className="mr-1 h-3 w-3" /> Reject
@@ -333,6 +364,11 @@ const AdminDashboard = () => {
 
           {/* Bookings Tab */}
           <TabsContent value="bookings">
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Input className="w-64" placeholder="Search booking ID/farmer/buyer" value={bookingFilters.search} onChange={(e)=>setBookingFilters((p)=>({...p, search:e.target.value}))} />
+              <Select value={bookingFilters.status} onValueChange={(v)=>setBookingFilters((p)=>({...p,status:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="Booking status" /></SelectTrigger><SelectContent><SelectItem value="all">All booking statuses</SelectItem><SelectItem value="pending_approval">Pending approval</SelectItem><SelectItem value="confirmed">Confirmed</SelectItem><SelectItem value="rejected">Rejected</SelectItem></SelectContent></Select>
+              <Select value={bookingFilters.payment} onValueChange={(v)=>setBookingFilters((p)=>({...p,payment:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="Payment status" /></SelectTrigger><SelectContent><SelectItem value="all">All payment statuses</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="paid">Paid</SelectItem><SelectItem value="rejected">Rejected</SelectItem><SelectItem value="promo_code">Promo</SelectItem></SelectContent></Select>
+            </div>
             <div className="rounded-lg border overflow-x-auto max-h-[500px] overflow-y-auto">
               <Table>
                 <TableHeader>
@@ -349,7 +385,7 @@ const AdminDashboard = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {bookings.map((b: any) => (
+                  {filteredBookings.map((b: any) => (
                     <TableRow key={b.id}>
                       <TableCell>{b.buyers?.buyer_name}</TableCell>
                       <TableCell className="text-xs">{b.buyers?.phone_number}<br />{b.buyers?.email}</TableCell>
@@ -358,7 +394,7 @@ const AdminDashboard = () => {
                       <TableCell>Ksh {b.total_amount?.toLocaleString()}</TableCell>
                       <TableCell><Badge variant="outline">{b.payment_status}</Badge></TableCell>
                       <TableCell>
-                        <Badge variant={b.booking_status === "approved" ? "default" : b.booking_status === "rejected" ? "destructive" : "secondary"}>
+                        <Badge variant={b.booking_status === "confirmed" ? "default" : b.booking_status === "rejected" ? "destructive" : "secondary"}>
                           {b.booking_status}
                         </Badge>
                       </TableCell>
@@ -366,8 +402,8 @@ const AdminDashboard = () => {
                       <TableCell>
                         {b.booking_status === "pending_approval" && (
                           <div className="flex gap-1">
-                            <Button size="sm" className="h-7 text-xs" onClick={() => updateBooking.mutate({ id: b.id, farmerId: b.farmer_id, status: "approved", booking: b })}>
-                              <CheckCircle className="mr-1 h-3 w-3" /> Approve
+                            <Button size="sm" className="h-7 text-xs" onClick={() => updateBooking.mutate({ id: b.id, farmerId: b.farmer_id, status: "confirmed", booking: b })}>
+                              <CheckCircle className="mr-1 h-3 w-3" /> Confirm
                             </Button>
                             <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => updateBooking.mutate({ id: b.id, farmerId: b.farmer_id, status: "rejected", booking: b })}>
                               <XCircle className="mr-1 h-3 w-3" /> Reject
@@ -384,6 +420,10 @@ const AdminDashboard = () => {
 
           {/* Buyers Tab */}
           <TabsContent value="buyers">
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Input className="w-64" placeholder="Search name/phone/email" value={buyerFilters.search} onChange={(e)=>setBuyerFilters((p)=>({...p,search:e.target.value}))} />
+              <Select value={buyerFilters.county} onValueChange={(v)=>setBuyerFilters((p)=>({...p,county:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="County" /></SelectTrigger><SelectContent><SelectItem value="all">All counties</SelectItem>{Array.from(new Set(buyers.map(b=>b.county).filter(Boolean))).map((c)=><SelectItem key={c} value={c}>{c}</SelectItem>)}</SelectContent></Select>
+            </div>
             <div className="rounded-lg border overflow-x-auto max-h-[500px] overflow-y-auto">
               <Table>
                 <TableHeader>
@@ -397,7 +437,7 @@ const AdminDashboard = () => {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {buyers.map((b) => (
+                  {filteredBuyers.map((b) => (
                     <TableRow key={b.id}>
                       <TableCell>{b.buyer_name}</TableCell>
                       <TableCell>{b.phone_number}</TableCell>
