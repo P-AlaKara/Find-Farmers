@@ -7,6 +7,8 @@ export interface AuthSession {
   email: string;
 }
 
+// Single auth path for runtime: custom api-auth + local session storage.
+// Do not mix with supabase.auth sessions unless a full migration is done.
 const KEY = "potatomarket_auth_session";
 
 export const saveSession = (session: AuthSession) => localStorage.setItem(KEY, JSON.stringify(session));
