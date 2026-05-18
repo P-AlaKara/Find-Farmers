@@ -150,6 +150,7 @@ Deno.serve(async (req) => {
         currency: "KES",
         reference: paymentReference,
         metadata: { booking_id: booking.id, farmer_id: farmer.id },
+        channels: ["mobile_money"],
       }),
     });
 
@@ -158,7 +159,7 @@ Deno.serve(async (req) => {
       await supabase.from("bookings").delete().eq("id", booking.id);
       await supabase.from("farmers").update({ listing_status: "available" }).eq("id", farmer.id);
       return new Response(
-        JSON.stringify({ error: psJson?.message || "Failed to initialize payment" }),
+        JSON.stringify({ error: psJson?.message || "Failed to initialize payment", paystack_status: psRes.status }),
         { status: 500, headers: { ...corsHeaders, "Content-Type": "application/json" } },
       );
     }
@@ -170,6 +171,7 @@ Deno.serve(async (req) => {
           payment_url: psJson.data.authorization_url,
           access_code: psJson.data.access_code,
           booking_ref: booking.id,
+          payment_reference: paymentReference,
         },
       }),
       { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },

@@ -147,13 +147,14 @@ const Marketplace = () => {
         return;
       }
 
-      const { access_code, booking_ref } = data.data;
+      const { access_code, booking_ref, payment_reference } = data.data;
       const PaystackPop = await loadPaystack();
       const handler = PaystackPop.setup({
         key: import.meta.env.VITE_PAYSTACK_PUBLIC_KEY,
         email: buyerForm.email.trim(),
         amount: Math.round(acres * 5000 * 100),
-        ref: booking_ref,
+        ref: payment_reference || booking_ref,
+        channels: ["mobile_money"],
         access_code,
         onSuccess: () => {
           setSubmitting(false);
