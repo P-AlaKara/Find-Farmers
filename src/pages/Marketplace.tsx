@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -7,13 +8,13 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { toast } from "sonner";
 import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
+import { getSession } from "@/lib/auth";
 import { KENYA_COUNTIES, POTATO_VARIETIES, HARVEST_DAYS } from "@/data/kenyaLocations";
-import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2, Smartphone } from "lucide-react";
+import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2, Smartphone, LogIn } from "lucide-react";
 import { format, addDays } from "date-fns";
 
 const getEstimatedHarvest = (plantingDate: string, variety: string) => {
@@ -21,21 +22,16 @@ const getEstimatedHarvest = (plantingDate: string, variety: string) => {
   return addDays(new Date(plantingDate), days);
 };
 
-const statusColor = (status: string) => {
-  switch (status) {
-    case "available": return "default";
-    case "booked": return "destructive";
-    case "pending_approval": return "secondary";
-    default: return "outline";
-  }
-};
+const PRICE_PER_ACRE = 5000;
 
 const Marketplace = () => {
   const queryClient = useQueryClient();
+  const session = getSession();
+  const isBuyer = session?.role === "buyer";
+
   const [filters, setFilters] = useState({ county: "", variety: "", search: "" });
   const [bookingFarmer, setBookingFarmer] = useState<any>(null);
-  const [buyerForm, setBuyerForm] = useState({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: "" });
-  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
+  const [authPromptFarmer, setAuthPromptFarmer] = useState<any>(null);
   const [submitting, setSubmitting] = useState(false);
   const [modalMessage, setModalMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
@@ -65,89 +61,56 @@ const Marketplace = () => {
     return true;
   });
 
-  const openBooking = (farmer: any) => {
+  const onBookClick = (farmer: any) => {
+    if (!isBuyer) {
+      setAuthPromptFarmer(farmer);
+      return;
+    }
     setBookingFarmer(farmer);
-    setBuyerForm({ buyer_name: "", phone_number: "", email: "", county: "", acres_to_book: "" });
-    setFieldErrors({});
     setModalMessage(null);
   };
 
-  const closeModal = () => {
+  const closeBooking = () => {
     if (submitting) return;
     setBookingFarmer(null);
-    setFieldErrors({});
     setModalMessage(null);
   };
 
-  const validate = () => {
-    const errs: Record<string, string> = {};
-    if (!buyerForm.buyer_name.trim()) errs.buyer_name = "Full name is required";
-    if (!buyerForm.phone_number.trim()) errs.phone_number = "Phone number is required";
-    if (!buyerForm.email.trim()) errs.email = "Email is required";
-    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(buyerForm.email.trim())) errs.email = "Invalid email";
-    if (!buyerForm.county.trim()) errs.county = "County is required";
-    const acres = parseFloat(buyerForm.acres_to_book);
-    if (!buyerForm.acres_to_book || isNaN(acres) || acres <= 0) {
-      errs.acres_to_book = "Acres must be greater than 0";
-    } else if (bookingFarmer && acres > Number(bookingFarmer.acreage_planted)) {
-      errs.acres_to_book = `Cannot exceed ${bookingFarmer.acreage_planted} acres`;
-    }
-    setFieldErrors(errs);
-    return Object.keys(errs).length === 0;
-  };
-
-  const handleBooking = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const confirmBooking = async () => {
+    if (!bookingFarmer || !session) return;
     setModalMessage(null);
-    if (!bookingFarmer || !validate()) return;
-
-    const acres = parseFloat(buyerForm.acres_to_book);
     setSubmitting(true);
-
     try {
       const { data, error } = await supabase.functions.invoke("initialize-payment", {
-        body: {
-          farmer_id: bookingFarmer.id,
-          name: buyerForm.buyer_name.trim(),
-          phone: buyerForm.phone_number.trim(),
-          email: buyerForm.email.trim(),
-          county: buyerForm.county,
-          acres,
-        },
+        body: { farmer_id: bookingFarmer.id, buyer_id: session.userId },
       });
-
       if (error || !data?.data?.reference) {
         const msg = (data as any)?.error || error?.message || "Failed to initialize payment";
         setModalMessage({ type: "error", text: msg });
         setSubmitting(false);
         return;
       }
-
       const { reference, booking_ref, message } = data.data;
       setSubmitting(false);
       setBookingFarmer(null);
-      setFieldErrors({});
-      setModalMessage(null);
       setPaymentOverlay({ reference, bookingRef: booking_ref, message, paid: false, timeout: false });
 
       let attempts = 0;
       const maxAttempts = 75;
       const intervalId = window.setInterval(async () => {
         attempts += 1;
-        const { data: statusData, error: statusError } = await supabase.functions.invoke(`booking-status?reference=${reference}`, {
-          method: "GET",
-        });
+        const { data: statusData, error: statusError } = await supabase.functions.invoke(`booking-status?reference=${reference}`, { method: "GET" });
         if (!statusError && statusData?.data?.payment_status === "paid") {
           window.clearInterval(intervalId);
           setPaymentOverlay((prev) => prev ? { ...prev, paid: true } : prev);
-          setSuccessBanner("Booking confirmed! We will be in touch shortly.");
-          toast.success("Booking confirmed! We will be in touch shortly.");
+          setSuccessBanner("Booking confirmed! The farm has been reserved for you.");
+          toast.success("Booking confirmed!");
           queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
         } else if (attempts >= maxAttempts) {
           window.clearInterval(intervalId);
           setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
         }
-      });
+      }, 4000);
     } catch (err: any) {
       console.error(err);
       setModalMessage({ type: "error", text: err?.message || "Something went wrong" });
@@ -155,7 +118,7 @@ const Marketplace = () => {
     }
   };
 
-  const totalPrice = (parseFloat(buyerForm.acres_to_book) || 0) * 5000;
+  const totalPrice = bookingFarmer ? Number(bookingFarmer.acreage_planted) * PRICE_PER_ACRE : 0;
 
   const FarmerCard = ({ farmer }: { farmer: any }) => {
     const harvest = getEstimatedHarvest(farmer.planting_date, farmer.potato_variety);
@@ -164,31 +127,15 @@ const Marketplace = () => {
         <CardContent className="p-6">
           <div className="mb-3 flex items-center justify-between">
             <span className="font-mono text-sm font-semibold text-primary">{farmer.farmer_id}</span>
-            <Badge variant={statusColor(farmer.listing_status) as any}>
-              {farmer.listing_status === "available" ? "Available" : farmer.listing_status}
-            </Badge>
+            <Badge>Available</Badge>
           </div>
           <div className="space-y-2 text-sm text-muted-foreground">
-            <div className="flex items-center gap-2">
-              <MapPin className="h-4 w-4 text-primary/70" />
-              <span>{farmer.county}, {farmer.ward}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Wheat className="h-4 w-4 text-primary/70" />
-              <span>{farmer.potato_variety} — {farmer.acreage_planted} acres</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-primary/70" />
-              <span>Planted: {format(new Date(farmer.planting_date), "dd MMM yyyy")}</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <Calendar className="h-4 w-4 text-harvest-gold" />
-              <span className="font-medium text-foreground">Harvest: ~{format(harvest, "dd MMM yyyy")}</span>
-            </div>
+            <div className="flex items-center gap-2"><MapPin className="h-4 w-4 text-primary/70" /><span>{farmer.county}, {farmer.ward}</span></div>
+            <div className="flex items-center gap-2"><Wheat className="h-4 w-4 text-primary/70" /><span>{farmer.potato_variety} — {farmer.acreage_planted} acres</span></div>
+            <div className="flex items-center gap-2"><Calendar className="h-4 w-4 text-primary/70" /><span>Planted: {format(new Date(farmer.planting_date), "dd MMM yyyy")}</span></div>
+            <div className="flex items-center gap-2"><Calendar className="h-4 w-4 text-harvest-gold" /><span className="font-medium text-foreground">Harvest: ~{format(harvest, "dd MMM yyyy")}</span></div>
           </div>
-          <Button className="mt-4 w-full" onClick={() => openBooking(farmer)}>
-            Book Farmer
-          </Button>
+          <Button className="mt-4 w-full" onClick={() => onBookClick(farmer)}>Book Farm</Button>
         </CardContent>
       </Card>
     );
@@ -212,7 +159,7 @@ const Marketplace = () => {
             <button onClick={() => setSuccessBanner(null)} className="text-sm text-muted-foreground hover:text-foreground">Dismiss</button>
           </div>
         )}
-        {/* Filters */}
+
         <div className="mb-6 flex flex-wrap gap-3">
           <div className="relative w-64">
             <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -264,7 +211,6 @@ const Marketplace = () => {
                     <TableHead>Acreage</TableHead>
                     <TableHead>Planting Date</TableHead>
                     <TableHead>Est. Harvest</TableHead>
-                    <TableHead>Status</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -280,10 +226,7 @@ const Marketplace = () => {
                         <TableCell>{f.acreage_planted}</TableCell>
                         <TableCell>{format(new Date(f.planting_date), "dd MMM yy")}</TableCell>
                         <TableCell>{format(harvest, "dd MMM yy")}</TableCell>
-                        <TableCell><Badge variant={statusColor(f.listing_status) as any}>{f.listing_status}</Badge></TableCell>
-                        <TableCell>
-                          <Button size="sm" onClick={() => openBooking(f)}>Book</Button>
-                        </TableCell>
+                        <TableCell><Button size="sm" onClick={() => onBookClick(f)}>Book</Button></TableCell>
                       </TableRow>
                     );
                   })}
@@ -294,63 +237,54 @@ const Marketplace = () => {
         </Tabs>
       </div>
 
-      {/* Booking Dialog */}
-      <Dialog open={!!bookingFarmer} onOpenChange={(o) => !o && closeModal()}>
-        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
+      {/* Auth prompt for non-buyers */}
+      <Dialog open={!!authPromptFarmer} onOpenChange={(o) => !o && setAuthPromptFarmer(null)}>
+        <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle className="font-display">Book Farmer {bookingFarmer?.farmer_id}</DialogTitle>
+            <DialogTitle>Sign in to book this farm</DialogTitle>
+            <DialogDescription>You need a buyer account to reserve farms. Sign in or create your buyer profile to continue.</DialogDescription>
           </DialogHeader>
-          <form onSubmit={handleBooking} className="space-y-4" noValidate>
-            <div className="space-y-2">
-              <Label>Full Name *</Label>
-              <Input value={buyerForm.buyer_name} onChange={(e) => setBuyerForm((p) => ({ ...p, buyer_name: e.target.value }))} />
-              {fieldErrors.buyer_name && <p className="text-xs text-destructive">{fieldErrors.buyer_name}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label>Phone Number *</Label>
-              <Input value={buyerForm.phone_number} onChange={(e) => setBuyerForm((p) => ({ ...p, phone_number: e.target.value }))} />
-              <p className="text-xs text-muted-foreground">This number will receive an M-Pesa payment prompt. Ensure it is M-Pesa enabled.</p>
-              {fieldErrors.phone_number && <p className="text-xs text-destructive">{fieldErrors.phone_number}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label>Email *</Label>
-              <Input type="email" value={buyerForm.email} onChange={(e) => setBuyerForm((p) => ({ ...p, email: e.target.value }))} />
-              {fieldErrors.email && <p className="text-xs text-destructive">{fieldErrors.email}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label>County *</Label>
-              <Select value={buyerForm.county} onValueChange={(v) => setBuyerForm((p) => ({ ...p, county: v }))}>
-                <SelectTrigger><SelectValue placeholder="Select County" /></SelectTrigger>
-                <SelectContent>
-                  {Object.keys(KENYA_COUNTIES).map((c) => <SelectItem key={c} value={c}>{c}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              {fieldErrors.county && <p className="text-xs text-destructive">{fieldErrors.county}</p>}
-            </div>
-            <div className="space-y-2">
-              <Label>Acres to Book * (max {bookingFarmer?.acreage_planted})</Label>
-              <Input type="number" min="0.1" step="0.1" placeholder="e.g. 1" value={buyerForm.acres_to_book} onChange={(e) => setBuyerForm((p) => ({ ...p, acres_to_book: e.target.value }))} />
-              {fieldErrors.acres_to_book && <p className="text-xs text-destructive">{fieldErrors.acres_to_book}</p>}
-            </div>
-
-            <div className="rounded-lg border bg-secondary/50 p-4">
-              <p className="text-sm text-muted-foreground">Total Price:</p>
-              <p className="font-display text-2xl font-bold text-primary">Ksh {totalPrice.toLocaleString()}</p>
-              <p className="text-xs text-muted-foreground">{buyerForm.acres_to_book || 0} acre(s) × Ksh 5,000</p>
-            </div>
-
-            {modalMessage && (
-              <div className={`rounded-md border p-3 text-sm ${modalMessage.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-primary/30 bg-primary/10 text-foreground"}`}>
-                {modalMessage.text}
-              </div>
-            )}
-
-            <Button type="submit" className="w-full" disabled={submitting}>
-              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>) : "Request M-Pesa Prompt"}
-            </Button>
-          </form>
+          <div className="flex flex-col gap-2 pt-2">
+            <Button asChild><Link to="/login"><LogIn className="h-4 w-4 mr-2" /> Sign In</Link></Button>
+            <Button asChild variant="outline"><Link to="/register-buyer">Create Buyer Account</Link></Button>
+          </div>
         </DialogContent>
       </Dialog>
+
+      {/* Confirmation dialog for buyers */}
+      <Dialog open={!!bookingFarmer} onOpenChange={(o) => !o && closeBooking()}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirm Booking</DialogTitle>
+            <DialogDescription>You are about to reserve the full farm. This cannot be partially booked.</DialogDescription>
+          </DialogHeader>
+          {bookingFarmer && (
+            <div className="space-y-3 rounded-lg border bg-secondary/30 p-4 text-sm">
+              <div className="flex justify-between"><span className="text-muted-foreground">Farmer</span><span className="font-medium">{bookingFarmer.farmer_id}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Location</span><span>{bookingFarmer.county}, {bookingFarmer.ward}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Variety</span><span>{bookingFarmer.potato_variety}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Total Acreage</span><span className="font-medium">{bookingFarmer.acreage_planted} acres</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Price / Acre</span><span>KES {PRICE_PER_ACRE.toLocaleString()}</span></div>
+              <div className="border-t pt-3 flex justify-between items-center">
+                <span className="text-muted-foreground">Total</span>
+                <span className="font-display text-xl font-bold text-primary">KES {totalPrice.toLocaleString()}</span>
+              </div>
+            </div>
+          )}
+          {modalMessage && (
+            <div className={`rounded-md border p-3 text-sm ${modalMessage.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-primary/30 bg-primary/10"}`}>
+              {modalMessage.text}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={closeBooking} disabled={submitting}>Cancel</Button>
+            <Button onClick={confirmBooking} disabled={submitting}>
+              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>) : "Confirm & Pay"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {paymentOverlay && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6">
           <div className="w-full max-w-lg rounded-xl border bg-card p-8 text-center shadow-lg">
@@ -363,7 +297,7 @@ const Marketplace = () => {
                 <p className="text-sm text-destructive">⚠️ Once you enter your PIN, the payment cannot be cancelled or refunded.</p>
                 {paymentOverlay.timeout && (
                   <div className="mt-6">
-                    <p className="mb-4 text-sm text-muted-foreground">This is taking longer than expected. If you completed the M-Pesa payment, your booking will be confirmed shortly. You can safely close this window.</p>
+                    <p className="mb-4 text-sm text-muted-foreground">This is taking longer than expected. If you completed the M-Pesa payment, your booking will be confirmed shortly.</p>
                     <Button onClick={() => setPaymentOverlay(null)}>Close</Button>
                   </div>
                 )}
@@ -372,9 +306,12 @@ const Marketplace = () => {
               <>
                 <CheckCircle2 className="mx-auto mb-4 h-14 w-14 text-green-600" />
                 <h2 className="mb-2 text-2xl font-bold text-green-700">Booking Confirmed!</h2>
-                <p className="mb-2 text-muted-foreground">Your farmer has been successfully booked.</p>
+                <p className="mb-2 text-muted-foreground">Your farm has been reserved.</p>
                 <p className="mb-6 text-sm font-medium">Booking Ref: {paymentOverlay.bookingRef}</p>
-                <Button onClick={() => setPaymentOverlay(null)}>Close</Button>
+                <div className="flex gap-3 justify-center">
+                  <Button asChild><Link to="/buyer/bookings">View My Procurement</Link></Button>
+                  <Button variant="outline" onClick={() => setPaymentOverlay(null)}>Close</Button>
+                </div>
               </>
             )}
           </div>
