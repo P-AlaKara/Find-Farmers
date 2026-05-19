@@ -28,16 +28,9 @@ Deno.serve(async (req) => {
       });
     }
 
-    const { farmer_id, name, phone, email, county, acres } = body;
-    if (!farmer_id || !name || !phone || !email || !county || acres === undefined || acres === null) {
-      return new Response(JSON.stringify({ error: "Missing required fields" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-    const acresNum = Number(acres);
-    if (!Number.isFinite(acresNum) || acresNum <= 0) {
-      return new Response(JSON.stringify({ error: "Acres must be greater than 0" }), {
+    const { farmer_id, buyer_id: providedBuyerId, name, phone, email, county, acres } = body;
+    if (!farmer_id) {
+      return new Response(JSON.stringify({ error: "Missing farmer_id" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -68,54 +61,59 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (acresNum > Number(farmer.acreage_planted)) {
-      return new Response(JSON.stringify({ error: "Requested acres exceed farmer's planted acreage" }), {
+
+    // Enforce full-acreage booking
+    const acresNum = Number(farmer.acreage_planted);
+    if (!Number.isFinite(acresNum) || acresNum <= 0) {
+      return new Response(JSON.stringify({ error: "Invalid farmer acreage" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Find or create buyer
+    // Resolve buyer: prefer authenticated buyer_id; fall back to legacy lookup/create for back-compat
     let buyerId: string | null = null;
-    const { data: existingBuyer } = await supabase
-      .from("buyers")
-      .select("id, account_status")
-      .or(`email.eq.${email},phone_number.eq.${phone}`)
-      .maybeSingle();
+    let buyerEmail = String(email || "").trim().toLowerCase();
+    let buyerPhone = String(phone || "").trim();
+    let buyerName = String(name || "").trim();
 
-    if (existingBuyer) {
-      buyerId = existingBuyer.id;
-      if (existingBuyer.account_status === "pending_setup") {
-        await supabase.from("buyers").update({ setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString() }).eq("id", existingBuyer.id);
+    if (providedBuyerId) {
+      const { data: b } = await supabase.from("buyers").select("id, email, phone_number, buyer_name").eq("id", providedBuyerId).maybeSingle();
+      if (!b) {
+        return new Response(JSON.stringify({ error: "Buyer account not found" }), {
+          status: 404,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
+      buyerId = b.id;
+      buyerEmail = b.email;
+      buyerPhone = b.phone_number;
+      buyerName = b.buyer_name;
     } else {
-      const { data: newBuyer, error: buyerErr } = await supabase
+      if (!name || !phone || !email || !county) {
+        return new Response(JSON.stringify({ error: "Missing required fields" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: existingBuyer } = await supabase
         .from("buyers")
-        .insert({ buyer_name: name, phone_number: phone, email, county, setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString(), account_status: "pending_setup" })
-        .select("id, setup_token")
-        .single();
-      if (buyerErr) throw buyerErr;
-      buyerId = newBuyer.id;
-      const appBaseUrl = Deno.env.get("APP_BASE_URL") || "http://localhost:5173";
-      const setupLink = `${appBaseUrl}/setup-account?token=${encodeURIComponent(newBuyer.setup_token)}`;
-      const html = `
-        <div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;border:1px solid #e5e7eb;">
-          <div style="background:#166534;color:#fff;padding:16px;font-size:20px;font-weight:700;">PotatoMarket Kenya</div>
-          <div style="padding:20px;color:#111827;">
-            <p>Hello ${name},</p>
-            <p>Your booking was successful and your account has been created.</p>
-            <p><a href="${setupLink}" style="display:inline-block;background:#166534;color:#fff;padding:12px 18px;text-decoration:none;border-radius:6px;font-weight:600;">Complete Account Setup</a></p>
-            <p>This link expires in 24 hours.</p>
-            <p>If the link expires, request a new one at:<br/><a href="${appBaseUrl}/setup-account">${appBaseUrl}/setup-account</a></p>
-          </div>
-          <div style="padding:16px;color:#6b7280;border-top:1px solid #e5e7eb;">© PotatoMarket Kenya</div>
-        </div>`;
-      try {
-        await sendEmail(email, "Complete your PotatoMarket Kenya account setup", html);
-      } catch (emailErr) {
-        console.error("Buyer setup email wrapper error:", emailErr);
+        .select("id, account_status")
+        .or(`email.eq.${buyerEmail},phone_number.eq.${buyerPhone}`)
+        .maybeSingle();
+      if (existingBuyer) {
+        buyerId = existingBuyer.id;
+      } else {
+        const { data: newBuyer, error: buyerErr } = await supabase
+          .from("buyers")
+          .insert({ buyer_name: buyerName, phone_number: buyerPhone, email: buyerEmail, county, account_status: "pending_setup" })
+          .select("id")
+          .single();
+        if (buyerErr) throw buyerErr;
+        buyerId = newBuyer.id;
       }
     }
+
 
     const total_amount = acresNum * 5000;
 
