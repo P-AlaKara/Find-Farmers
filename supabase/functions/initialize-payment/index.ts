@@ -77,11 +77,23 @@ Deno.serve(async (req) => {
 
     // Find or create buyer
     let buyerId: string | null = null;
-    const { data: existingBuyer } = await supabase
+    const { data: existingBuyers, error: existingBuyerErr } = await supabase
       .from("buyers")
-      .select("id, account_status")
-      .or(`email.eq.${email},phone_number.eq.${phone}`)
-      .maybeSingle();
+      .select("id, account_status, email, phone_number")
+      .or(`email.eq.${email},phone_number.eq.${phone}`);
+
+    if (existingBuyerErr) {
+      throw new Error(`Failed to lookup buyer: ${existingBuyerErr.message}`);
+    }
+
+    if ((existingBuyers || []).length > 1) {
+      return new Response(JSON.stringify({ error: "An account with that email/phone already exists with conflicting records. Please contact support." }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const existingBuyer = existingBuyers?.[0] ?? null;
 
     if (existingBuyer) {
       buyerId = existingBuyer.id;
