@@ -67,17 +67,17 @@ Deno.serve(async (req) => {
 
 
   if (path === "/register-buyer" && req.method === "POST") {
-    const { buyer_name, phone_number, email, county, password, confirm_password } = await req.json();
-    const name = String(buyer_name || "").trim();
-    const phone = String(phone_number || "").trim();
-    const normalizedEmail = String(email || "").trim().toLowerCase();
-    const countyName = String(county || "").trim();
-    const pwd = String(password || "");
+    const b = await req.json();
+    const name = String(b.buyer_name || b.company_name || "").trim();
+    const phone = String(b.phone_number || "").trim();
+    const normalizedEmail = String(b.email || "").trim().toLowerCase();
+    const countyName = String(b.county || b.primary_county || "").trim();
+    const pwd = String(b.password || "");
 
-    if (!name || !phone || !normalizedEmail || !countyName || !pwd || !confirm_password) return j({ error: "Missing required fields" }, 400);
+    if (!name || !phone || !normalizedEmail || !countyName || !pwd || !b.confirm_password) return j({ error: "Missing required fields" }, 400);
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return j({ error: "Invalid email" }, 400);
     if (pwd.length < 8) return j({ error: "Password must be at least 8 characters" }, 400);
-    if (pwd !== String(confirm_password)) return j({ error: "Passwords do not match" }, 400);
+    if (pwd !== String(b.confirm_password)) return j({ error: "Passwords do not match" }, 400);
 
     const { data: existing } = await db.from("buyers").select("id").eq("email", normalizedEmail).maybeSingle();
     if (existing) return j({ error: "An account with this email already exists" }, 409);
@@ -91,6 +91,24 @@ Deno.serve(async (req) => {
       account_status: "active",
       setup_token: null,
       setup_token_expires_at: null,
+      company_name: b.company_name ?? null,
+      business_type: b.business_type ?? null,
+      primary_county: b.primary_county ?? null,
+      primary_town: b.primary_town ?? null,
+      additional_locations: b.additional_locations ?? [],
+      varieties_required: b.varieties_required ?? [],
+      varieties_other: b.varieties_other ?? null,
+      quantity_per_order: b.quantity_per_order ?? null,
+      quantity_unit: b.quantity_unit ?? null,
+      demand_frequency: b.demand_frequency ?? null,
+      demand_frequency_custom: b.demand_frequency_custom ?? null,
+      quality_preference: b.quality_preference ?? null,
+      quality_specifications: b.quality_specifications ?? null,
+      contact_full_name: b.contact_full_name ?? null,
+      contact_role: b.contact_role ?? null,
+      preferred_contact_methods: b.preferred_contact_methods ?? [],
+      additional_notes: b.additional_notes ?? null,
+      profile_completed: true,
     });
 
     if (error) return j({ error: error.message }, 400);
