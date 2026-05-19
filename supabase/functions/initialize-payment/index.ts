@@ -70,14 +70,17 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
-    if (acresNum > Number(farmer.acreage_planted)) {
-      return new Response(JSON.stringify({ error: "Requested acres exceed farmer's planted acreage" }), {
+
+    // Enforce full-acreage booking
+    const acresNum = Number(farmer.acreage_planted);
+    if (!Number.isFinite(acresNum) || acresNum <= 0) {
+      return new Response(JSON.stringify({ error: "Invalid farmer acreage" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    // Find or create buyer
+    // Resolve buyer: prefer authenticated buyer_id; fall back to legacy lookup/create for back-compat
     let buyerId: string | null = null;
     const { data: existingBuyers, error: existingBuyerErr } = await supabase
       .from("buyers")
@@ -102,8 +105,18 @@ Deno.serve(async (req) => {
       if (existingBuyer.account_status === "pending_setup") {
         await supabase.from("buyers").update({ setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString() }).eq("id", existingBuyer.id);
       }
+      buyerId = b.id;
+      buyerEmail = b.email;
+      buyerPhone = b.phone_number;
+      buyerName = b.buyer_name;
     } else {
-      const { data: newBuyer, error: buyerErr } = await supabase
+      if (!name || !phone || !email || !county) {
+        return new Response(JSON.stringify({ error: "Missing required fields" }), {
+          status: 400,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
+      }
+      const { data: existingBuyer } = await supabase
         .from("buyers")
         .insert({ buyer_name: name, phone_number: normalizedPhone, email: normalizedEmail, county, setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString(), account_status: "pending_setup" })
         .select("id, setup_token")
@@ -139,6 +152,7 @@ Deno.serve(async (req) => {
         console.error("Buyer setup email wrapper error:", emailErr);
       }
     }
+
 
     const total_amount = acresNum * 5000;
 
@@ -188,7 +202,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const formattedPhone = formatMpesaPhone(phone);
+    const formattedPhone = formatMpesaPhone(buyerPhone);
     const psRes = await fetch("https://api.paystack.co/charge", {
       method: "POST",
       headers: {
@@ -196,7 +210,7 @@ Deno.serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        email,
+        email: buyerEmail,
         amount: Math.round(total_amount * 100),
         currency: "KES",
         mobile_money: {

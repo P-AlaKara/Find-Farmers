@@ -98,39 +98,93 @@ export type Database = {
       buyers: {
         Row: {
           account_status: string
+          additional_locations: Json | null
+          additional_notes: string | null
+          business_type: string | null
           buyer_name: string
+          company_name: string | null
+          contact_full_name: string | null
+          contact_role: string | null
           county: string
           created_at: string
+          demand_frequency: string | null
+          demand_frequency_custom: string | null
           email: string
           id: string
           password_hash: string | null
           phone_number: string
+          preferred_contact_methods: string[] | null
+          primary_county: string | null
+          primary_town: string | null
+          profile_completed: boolean
+          quality_preference: string | null
+          quality_specifications: string | null
+          quantity_per_order: number | null
+          quantity_unit: string | null
           setup_token: string | null
           setup_token_expires_at: string | null
+          varieties_other: string | null
+          varieties_required: string[] | null
         }
         Insert: {
           account_status?: string
+          additional_locations?: Json | null
+          additional_notes?: string | null
+          business_type?: string | null
           buyer_name: string
+          company_name?: string | null
+          contact_full_name?: string | null
+          contact_role?: string | null
           county: string
           created_at?: string
+          demand_frequency?: string | null
+          demand_frequency_custom?: string | null
           email: string
           id?: string
           password_hash?: string | null
           phone_number: string
+          preferred_contact_methods?: string[] | null
+          primary_county?: string | null
+          primary_town?: string | null
+          profile_completed?: boolean
+          quality_preference?: string | null
+          quality_specifications?: string | null
+          quantity_per_order?: number | null
+          quantity_unit?: string | null
           setup_token?: string | null
           setup_token_expires_at?: string | null
+          varieties_other?: string | null
+          varieties_required?: string[] | null
         }
         Update: {
           account_status?: string
+          additional_locations?: Json | null
+          additional_notes?: string | null
+          business_type?: string | null
           buyer_name?: string
+          company_name?: string | null
+          contact_full_name?: string | null
+          contact_role?: string | null
           county?: string
           created_at?: string
+          demand_frequency?: string | null
+          demand_frequency_custom?: string | null
           email?: string
           id?: string
           password_hash?: string | null
           phone_number?: string
+          preferred_contact_methods?: string[] | null
+          primary_county?: string | null
+          primary_town?: string | null
+          profile_completed?: boolean
+          quality_preference?: string | null
+          quality_specifications?: string | null
+          quantity_per_order?: number | null
+          quantity_unit?: string | null
           setup_token?: string | null
           setup_token_expires_at?: string | null
+          varieties_other?: string | null
+          varieties_required?: string[] | null
         }
         Relationships: []
       }
