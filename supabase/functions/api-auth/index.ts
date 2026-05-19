@@ -124,9 +124,18 @@ Deno.serve(async (req) => {
   }
 
   if (path === "/buyer/profile" && (req.method === "PATCH" || req.method === "POST")) {
-    const { buyer_id, buyer_name, phone_number, county } = await req.json();
-    if (!buyer_id) return j({ error: "Missing buyer_id" }, 400);
-    const { error } = await db.from("buyers").update({ buyer_name, phone_number, county }).eq("id", buyer_id);
+    const b = await req.json();
+    if (!b.buyer_id) return j({ error: "Missing buyer_id" }, 400);
+    const updates: Record<string, unknown> = {};
+    const fields = [
+      "buyer_name","phone_number","county",
+      "company_name","business_type","primary_county","primary_town","additional_locations",
+      "varieties_required","varieties_other","quantity_per_order","quantity_unit",
+      "demand_frequency","demand_frequency_custom","quality_preference","quality_specifications",
+      "contact_full_name","contact_role","preferred_contact_methods","additional_notes",
+    ];
+    for (const f of fields) if (f in b) updates[f] = b[f];
+    const { error } = await db.from("buyers").update(updates).eq("id", b.buyer_id);
     if (error) return j({ error: error.message }, 400);
     return j({ ok: true });
   }
