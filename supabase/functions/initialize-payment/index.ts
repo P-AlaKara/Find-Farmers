@@ -163,7 +163,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    const formattedPhone = formatMpesaPhone(phone);
+    const formattedPhone = formatMpesaPhone(buyerPhone);
     const psRes = await fetch("https://api.paystack.co/charge", {
       method: "POST",
       headers: {
@@ -171,7 +171,7 @@ Deno.serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        email,
+        email: buyerEmail,
         amount: Math.round(total_amount * 100),
         currency: "KES",
         mobile_money: {
