@@ -43,7 +43,10 @@ export default function BuyerBookings() {
   return (
     <div className="container max-w-5xl py-8">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">My Bookings</h1>
+        <div>
+          <h1 className="text-2xl font-bold">My Procurement</h1>
+          <p className="text-sm text-muted-foreground">Your booked farms and reserved supply</p>
+        </div>
         <Button asChild variant="outline"><Link to="/marketplace">Back to Marketplace</Link></Button>
       </div>
 
