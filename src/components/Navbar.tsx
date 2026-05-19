@@ -12,6 +12,7 @@ const Navbar = () => {
         <div className="flex items-center gap-3">
           <Button variant="ghost" onClick={() => navigate("/marketplace")}>Marketplace</Button>
           <Button variant="outline" onClick={() => navigate("/register-farmer")}>Register as Farmer</Button>
+          <Button variant="outline" onClick={() => navigate("/register-buyer")}>Register as Buyer</Button>
           {session ? <Button variant="destructive" onClick={() => { clearSession(); navigate('/login'); }}>Logout</Button> : <Button onClick={()=>navigate('/login')}>Login</Button>}
         </div>
       </div>
