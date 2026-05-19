@@ -29,6 +29,8 @@ Deno.serve(async (req) => {
     }
 
     const { farmer_id, name, phone, email, county, acres } = body;
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const normalizedPhone = String(phone || "").replace(/[\s\-()]/g, "");
     if (!farmer_id || !name || !phone || !email || !county || acres === undefined || acres === null) {
       return new Response(JSON.stringify({ error: "Missing required fields" }), {
         status: 400,
@@ -77,11 +79,23 @@ Deno.serve(async (req) => {
 
     // Find or create buyer
     let buyerId: string | null = null;
-    const { data: existingBuyer } = await supabase
+    const { data: existingBuyers, error: existingBuyerErr } = await supabase
       .from("buyers")
-      .select("id, account_status")
-      .or(`email.eq.${email},phone_number.eq.${phone}`)
-      .maybeSingle();
+      .select("id, account_status, email, phone_number")
+      .or(`email.eq.${normalizedEmail},phone_number.eq.${normalizedPhone}`);
+
+    if (existingBuyerErr) {
+      throw new Error(`Failed to lookup buyer: ${existingBuyerErr.message}`);
+    }
+
+    if ((existingBuyers || []).length > 1) {
+      return new Response(JSON.stringify({ error: "An account with that email/phone already exists with conflicting records. Please contact support." }), {
+        status: 409,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const existingBuyer = existingBuyers?.[0] ?? null;
 
     if (existingBuyer) {
       buyerId = existingBuyer.id;
@@ -91,10 +105,19 @@ Deno.serve(async (req) => {
     } else {
       const { data: newBuyer, error: buyerErr } = await supabase
         .from("buyers")
-        .insert({ buyer_name: name, phone_number: phone, email, county, setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString(), account_status: "pending_setup" })
+        .insert({ buyer_name: name, phone_number: normalizedPhone, email: normalizedEmail, county, setup_token: crypto.randomUUID() + crypto.randomUUID(), setup_token_expires_at: new Date(Date.now()+86400000).toISOString(), account_status: "pending_setup" })
         .select("id, setup_token")
         .single();
-      if (buyerErr) throw buyerErr;
+      if (buyerErr) {
+        const code = (buyerErr as { code?: string }).code;
+        if (code === "23505") {
+          return new Response(JSON.stringify({ error: "An account with this email or phone number already exists. Please use the same contact details or contact support." }), {
+            status: 409,
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+        throw buyerErr;
+      }
       buyerId = newBuyer.id;
       const appBaseUrl = Deno.env.get("APP_BASE_URL") || "http://localhost:5173";
       const setupLink = `${appBaseUrl}/setup-account?token=${encodeURIComponent(newBuyer.setup_token)}`;
