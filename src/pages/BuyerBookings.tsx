@@ -17,23 +17,37 @@ type Row = {
   farmers: { full_name: string; county: string; phone_number: string; potato_variety: string } | null;
 };
 
+type BuyerProfile = {
+  buyer_name: string | null;
+  phone_number: string | null;
+  email: string | null;
+  county: string | null;
+  company_name: string | null;
+  business_type: string | null;
+  primary_county: string | null;
+  primary_town: string | null;
+  contact_full_name: string | null;
+  contact_role: string | null;
+};
+
 const fmtKES = (n: number) => `KES ${Number(n).toLocaleString()}`;
 const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
 export default function BuyerBookings() {
   const session = getSession();
   const [rows, setRows] = useState<Row[]>([]);
+  const [profile, setProfile] = useState<BuyerProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { data } = await supabase
-        .from("bookings")
-        .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, farmers(full_name, county, phone_number, potato_variety)")
-        .eq("buyer_id", session.userId)
-        .order("created_at", { ascending: false });
-      setRows((data as unknown as Row[]) || []);
+      const [{ data: profileData }, { data: bookingsData, error }] = await Promise.all([
+        supabase.functions.invoke("api-auth/buyer/profile/get", { body: { buyer_id: session.userId } }),
+        supabase.functions.invoke("api-auth/buyer/bookings", { body: { buyer_id: session.userId } }),
+      ]);
+      if (profileData?.data) setProfile(profileData.data as BuyerProfile);
+      if (!error && !bookingsData?.error) setRows((bookingsData?.data as unknown as Row[]) || []);
       setLoading(false);
     })();
   }, [session]);
@@ -49,6 +63,22 @@ export default function BuyerBookings() {
         </div>
         <Button asChild variant="outline"><Link to="/marketplace">Back to Marketplace</Link></Button>
       </div>
+
+      {profile && (
+        <Card className="mb-6">
+          <CardHeader><CardTitle>Profile Summary</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><div className="text-muted-foreground">Company</div><div>{profile.company_name || profile.buyer_name || "-"}</div></div>
+            <div><div className="text-muted-foreground">Business Type</div><div>{profile.business_type ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">Contact</div><div>{profile.contact_full_name || profile.buyer_name || "-"}</div></div>
+            <div><div className="text-muted-foreground">Role</div><div>{profile.contact_role ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">Phone</div><div>{profile.phone_number ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">Email</div><div>{profile.email ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">Primary Location</div><div>{profile.primary_county || profile.county || "-"}{profile.primary_town ? `, ${profile.primary_town}` : ""}</div></div>
+            <div><div className="text-muted-foreground">Bookings</div><div>{rows.length}</div></div>
+          </CardContent>
+        </Card>
+      )}
 
       {loading ? (
         <p className="text-muted-foreground">Loading…</p>

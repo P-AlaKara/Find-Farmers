@@ -42,7 +42,8 @@ export default function BuyerSettings() {
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { data } = await supabase.from("buyers").select("*").eq("id", session.userId).maybeSingle();
+      const { data: response } = await supabase.functions.invoke("api-auth/buyer/profile/get", { body: { buyer_id: session.userId } });
+      const data = response?.data;
       if (data) setProfile({
         ...profile, ...data,
         additional_locations: Array.isArray(data.additional_locations) ? data.additional_locations : [],

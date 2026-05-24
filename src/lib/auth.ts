@@ -7,6 +7,12 @@ export interface AuthSession {
   email: string;
 }
 
+export const roleHome = (role: UserRole) => {
+  if (role === "admin") return "/admin/dashboard";
+  if (role === "farmer") return "/farmer/dashboard";
+  return "/marketplace";
+};
+
 // Single auth path for runtime: custom api-auth + local session storage.
 // Do not mix with supabase.auth sessions unless a full migration is done.
 const KEY = "potatomarket_auth_session";

@@ -19,27 +19,38 @@ type Booking = {
   buyers?: { buyer_name: string; phone_number: string; email: string; county: string } | null;
 };
 
+type FarmerSummary = {
+  registration_status: string;
+  listing_status: string;
+  full_name: string;
+  phone_number: string | null;
+  email: string | null;
+  county: string | null;
+  ward: string | null;
+  specific_location: string | null;
+  potato_variety: string | null;
+  acreage_planted: number | null;
+  planting_date: string | null;
+};
+
 const fmtKES = (n: number) => `KES ${Number(n).toLocaleString()}`;
 const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
 
 export default function FarmerDashboard() {
   const navigate = useNavigate();
   const session = getSession();
-  const [farmer, setFarmer] = useState<{ registration_status: string; listing_status: string; full_name: string } | null>(null);
+  const [farmer, setFarmer] = useState<FarmerSummary | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (!session) return;
     (async () => {
-      const { data: f } = await supabase.from("farmers").select("registration_status, listing_status, full_name").eq("id", session.userId).maybeSingle();
-      setFarmer(f as any);
-      const { data: b } = await supabase
-        .from("bookings")
-        .select("id, acres_booked, total_amount, price_per_acre, payment_status, booking_status, created_at, buyer_id, buyers(buyer_name, phone_number, email, county)")
-        .eq("farmer_id", session.userId)
-        .order("created_at", { ascending: false });
-      setBookings((b as unknown as Booking[]) || []);
+      const { data, error } = await supabase.functions.invoke("api-auth/farmer/dashboard", { body: { farmer_id: session.userId } });
+      if (!error && !data?.error) {
+        setFarmer((data?.farmer as FarmerSummary | null) || null);
+        setBookings((data?.bookings as unknown as Booking[]) || []);
+      }
       setLoading(false);
     })();
   }, [session]);
@@ -72,6 +83,22 @@ export default function FarmerDashboard() {
           <CardContent><p className="text-sm text-muted-foreground">Your account is pending approval. You will be notified once approved.</p></CardContent>
         )}
       </Card>
+
+      {farmer && (
+        <Card>
+          <CardHeader><CardTitle>Profile Summary</CardTitle></CardHeader>
+          <CardContent className="grid grid-cols-2 md:grid-cols-4 gap-3 text-sm">
+            <div><div className="text-muted-foreground">Phone</div><div>{farmer.phone_number ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">Email</div><div>{farmer.email ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">County / Ward</div><div>{farmer.county ?? "-"}{farmer.ward ? `, ${farmer.ward}` : ""}</div></div>
+            <div><div className="text-muted-foreground">Location</div><div>{farmer.specific_location ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">Variety</div><div>{farmer.potato_variety ?? "-"}</div></div>
+            <div><div className="text-muted-foreground">Acreage</div><div>{farmer.acreage_planted ?? "-"} acres</div></div>
+            <div><div className="text-muted-foreground">Planting Date</div><div>{farmer.planting_date ? fmtDate(farmer.planting_date) : "-"}</div></div>
+            <div><div className="text-muted-foreground">Listing</div><div>{farmer.listing_status ?? "-"}</div></div>
+          </CardContent>
+        </Card>
+      )}
 
       <div>
         <h2 className="text-xl font-semibold mb-3">My Bookings</h2>
