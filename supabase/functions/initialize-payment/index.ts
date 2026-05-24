@@ -57,10 +57,16 @@ const summarizePaystack = (payload: Record<string, unknown>) => ({
 });
 
 const formatMpesaPhone = (phone: string) => {
-  const cleaned = String(phone || "").replace(/[\s\-()]/g, "");
-  if (cleaned.startsWith("+254")) return cleaned.slice(1);
-  if (cleaned.startsWith("0")) return `254${cleaned.slice(1)}`;
-  return cleaned;
+  const raw = String(phone || "").trim();
+  const digits = raw.replace(/\D/g, "");
+  let local = "";
+
+  if (digits.startsWith("254")) local = digits.slice(3);
+  else if (digits.startsWith("0")) local = digits.slice(1);
+  else if (digits.length === 9) local = digits;
+
+  if (!/^(7|1)\d{8}$/.test(local)) return null;
+  return `+254${local}`;
 };
 
 const rollbackReservation = async (
@@ -265,6 +271,13 @@ Deno.serve(async (req) => {
     }
 
     const formattedPhone = formatMpesaPhone(buyer.phone_number);
+    if (!formattedPhone) {
+      return fail(
+        "Please update your buyer profile with a valid Kenyan M-Pesa phone number, for example 07XXXXXXXX or +2547XXXXXXXX.",
+        "invalid_mpesa_phone",
+      );
+    }
+
     log(requestId, "Calling Paystack charge endpoint", {
       booking_id: booking.id,
       reference: paymentReference,

@@ -85,7 +85,9 @@ const Marketplace = () => {
         body: { farmer_id: bookingFarmer.id, buyer_id: session.userId },
       });
       if (error || data?.ok === false || !data?.data?.reference) {
-        const msg = data?.error || "We could not start the M-Pesa payment. Please try again.";
+        const msg = data?.request_id
+          ? `${data?.error || "We could not start the M-Pesa payment. Please try again."} Reference: ${data.request_id}`
+          : data?.error || "We could not start the M-Pesa payment. Please try again.";
         setModalMessage({ type: "error", text: msg });
         setSubmitting(false);
         return;
