@@ -12,11 +12,13 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
   const session = getSession();
   if (session) return <Navigate to={roleHome(session.role)} replace />;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    setMessage("");
     setLoading(true);
     const normalizedEmail = email.trim().toLowerCase();
     const { data, error } = await supabase.functions.invoke<AuthSession & { error?: string }>("api-auth/login", {
@@ -25,7 +27,9 @@ export default function Login() {
     setLoading(false);
 
     if (error || data?.error || !data?.token || !data?.role || !data?.userId) {
-      toast.error(data?.error || error?.message || "Unable to sign in. Please check your credentials.");
+      const friendlyMessage = data?.error || "Invalid email or password. Please try again.";
+      setMessage(friendlyMessage);
+      toast.error(friendlyMessage);
       return;
     }
 
@@ -50,6 +54,7 @@ export default function Login() {
           <form className="space-y-4" onSubmit={onSubmit}>
             <Input type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
             <Input type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
+            {message && <p className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{message}</p>}
             <Button className="w-full" disabled={loading}>{loading ? "Signing in..." : "Sign In"}</Button>
             <div className="text-sm space-y-1 text-center">
               <Link to="/register-farmer" className="underline block">Register as a farmer</Link>
