@@ -84,8 +84,8 @@ const Marketplace = () => {
       const { data, error } = await supabase.functions.invoke("initialize-payment", {
         body: { farmer_id: bookingFarmer.id, buyer_id: session.userId },
       });
-      if (error || !data?.data?.reference) {
-        const msg = (data as any)?.error || error?.message || "Failed to initialize payment";
+      if (error || data?.ok === false || !data?.data?.reference) {
+        const msg = data?.error || "We could not start the M-Pesa payment. Please try again.";
         setModalMessage({ type: "error", text: msg });
         setSubmitting(false);
         return;
@@ -111,9 +111,8 @@ const Marketplace = () => {
           setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
         }
       }, 4000);
-    } catch (err: any) {
-      console.error(err);
-      setModalMessage({ type: "error", text: err?.message || "Something went wrong" });
+    } catch {
+      setModalMessage({ type: "error", text: "We could not start the M-Pesa payment. Please try again." });
       setSubmitting(false);
     }
   };

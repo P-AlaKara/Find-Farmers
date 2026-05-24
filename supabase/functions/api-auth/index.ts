@@ -7,6 +7,7 @@ const compare = (s: string, h: string) => bcrypt.compare(s, h);
 const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type" };
 const sb = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
+const authError = (error: string) => j({ ok: false, error });
 const gen = () => crypto.randomUUID() + crypto.randomUUID();
 const isEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
@@ -30,22 +31,38 @@ Deno.serve(async (req) => {
     if (!normalizedEmail || !pwd) return j({ error: "Email and password are required" }, 400);
     const adminEmail = Deno.env.get("ADMIN_EMAIL");
     const adminPass = Deno.env.get("ADMIN_PASSWORD");
+    const normalizedAdminEmail = adminEmail?.trim().toLowerCase();
     if (adminEmail && adminPass) {
-      const normalizedAdminEmail = adminEmail.trim().toLowerCase();
-      const { data } = await db.from("admins").select("id").eq("email", normalizedAdminEmail).maybeSingle();
-      if (!data) await db.from("admins").insert({ email: normalizedAdminEmail, password_hash: await hash(adminPass, 10) });
+      const adminHash = await hash(adminPass, 10);
+      const { data } = await db.from("admins").select("id,password_hash").eq("email", normalizedAdminEmail).maybeSingle();
+      if (!data) {
+        await db.from("admins").insert({ email: normalizedAdminEmail, password_hash: adminHash });
+      } else if (normalizedEmail === normalizedAdminEmail && pwd === adminPass && !(await compare(pwd, data.password_hash))) {
+        await db.from("admins").update({ password_hash: adminHash }).eq("id", data.id);
+      }
     }
 
     const { data: admin } = await db.from("admins").select("id,email,password_hash").eq("email", normalizedEmail).maybeSingle();
     if (admin?.password_hash && await compare(pwd, admin.password_hash)) return j({ token: gen(), role: "admin", userId: admin.id, email: admin.email });
+    if (normalizedAdminEmail && adminPass && normalizedEmail === normalizedAdminEmail && pwd === adminPass) {
+      const { data: upserted, error: upsertErr } = await db
+        .from("admins")
+        .upsert({ email: normalizedAdminEmail, password_hash: await hash(adminPass, 10) }, { onConflict: "email" })
+        .select("id,email")
+        .single();
+      if (upsertErr) return j({ error: upsertErr.message }, 500);
+      return j({ token: gen(), role: "admin", userId: upserted.id, email: upserted.email });
+    }
 
     const { data: farmer } = await db.from("farmers").select("id,email,password_hash").eq("email", normalizedEmail).maybeSingle();
+    if (farmer && !farmer.password_hash) return authError("This farmer account does not have a password set. Please register again or contact support.");
     if (farmer?.password_hash && await compare(pwd, farmer.password_hash)) return j({ token: gen(), role: "farmer", userId: farmer.id, email: farmer.email });
 
     const { data: buyer } = await db.from("buyers").select("id,email,password_hash,account_status").eq("email", normalizedEmail).maybeSingle();
-    if (buyer?.account_status === "pending_setup" && !buyer?.password_hash) return j({ error: "Please complete your account setup via the link sent to your WhatsApp." }, 401);
+    if (buyer?.account_status === "pending_setup" && !buyer?.password_hash) return authError("Please complete your account setup via the link sent to your WhatsApp.");
+    if (buyer && !buyer.password_hash) return authError("This buyer account does not have a password set. Please complete account setup or contact support.");
     if (buyer?.password_hash && await compare(pwd, buyer.password_hash)) return j({ token: gen(), role: "buyer", userId: buyer.id, email: buyer.email });
-    return j({ error: "Invalid email or password" }, 401);
+    return authError("Invalid email or password");
   }
 
   if (path === "/validate-token") {
