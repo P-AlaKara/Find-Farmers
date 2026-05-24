@@ -8,6 +8,7 @@ const cors = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers
 const sb = () => createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 const j = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...cors, "Content-Type": "application/json" } });
 const gen = () => crypto.randomUUID() + crypto.randomUUID();
+const isEmail = (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
 async function isAdmin(db: ReturnType<typeof sb>, admin_id?: string) {
   if (!admin_id) return false;
@@ -24,22 +25,26 @@ Deno.serve(async (req) => {
 
   if (path === "/login" && req.method === "POST") {
     const { email, password } = await req.json();
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    const pwd = String(password || "");
+    if (!normalizedEmail || !pwd) return j({ error: "Email and password are required" }, 400);
     const adminEmail = Deno.env.get("ADMIN_EMAIL");
     const adminPass = Deno.env.get("ADMIN_PASSWORD");
     if (adminEmail && adminPass) {
-      const { data } = await db.from("admins").select("id").eq("email", adminEmail).maybeSingle();
-      if (!data) await db.from("admins").insert({ email: adminEmail, password_hash: await hash(adminPass, 10) });
+      const normalizedAdminEmail = adminEmail.trim().toLowerCase();
+      const { data } = await db.from("admins").select("id").eq("email", normalizedAdminEmail).maybeSingle();
+      if (!data) await db.from("admins").insert({ email: normalizedAdminEmail, password_hash: await hash(adminPass, 10) });
     }
 
-    const { data: admin } = await db.from("admins").select("id,email,password_hash").eq("email", email).maybeSingle();
-    if (admin?.password_hash && await compare(password, admin.password_hash)) return j({ token: gen(), role: "admin", userId: admin.id, email: admin.email });
+    const { data: admin } = await db.from("admins").select("id,email,password_hash").eq("email", normalizedEmail).maybeSingle();
+    if (admin?.password_hash && await compare(pwd, admin.password_hash)) return j({ token: gen(), role: "admin", userId: admin.id, email: admin.email });
 
-    const { data: farmer } = await db.from("farmers").select("id,email,password_hash").eq("email", email).maybeSingle();
-    if (farmer?.password_hash && await compare(password, farmer.password_hash)) return j({ token: gen(), role: "farmer", userId: farmer.id, email: farmer.email });
+    const { data: farmer } = await db.from("farmers").select("id,email,password_hash").eq("email", normalizedEmail).maybeSingle();
+    if (farmer?.password_hash && await compare(pwd, farmer.password_hash)) return j({ token: gen(), role: "farmer", userId: farmer.id, email: farmer.email });
 
-    const { data: buyer } = await db.from("buyers").select("id,email,password_hash,account_status").eq("email", email).maybeSingle();
+    const { data: buyer } = await db.from("buyers").select("id,email,password_hash,account_status").eq("email", normalizedEmail).maybeSingle();
     if (buyer?.account_status === "pending_setup" && !buyer?.password_hash) return j({ error: "Please complete your account setup via the link sent to your WhatsApp." }, 401);
-    if (buyer?.password_hash && await compare(password, buyer.password_hash)) return j({ token: gen(), role: "buyer", userId: buyer.id, email: buyer.email });
+    if (buyer?.password_hash && await compare(pwd, buyer.password_hash)) return j({ token: gen(), role: "buyer", userId: buyer.id, email: buyer.email });
     return j({ error: "Invalid email or password" }, 401);
   }
 
@@ -75,7 +80,7 @@ Deno.serve(async (req) => {
     const pwd = String(b.password || "");
 
     if (!name || !phone || !normalizedEmail || !countyName || !pwd || !b.confirm_password) return j({ error: "Missing required fields" }, 400);
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) return j({ error: "Invalid email" }, 400);
+    if (!isEmail(normalizedEmail)) return j({ error: "Invalid email" }, 400);
     if (pwd.length < 8) return j({ error: "Password must be at least 8 characters" }, 400);
     if (pwd !== String(b.confirm_password)) return j({ error: "Passwords do not match" }, 400);
 
@@ -117,10 +122,59 @@ Deno.serve(async (req) => {
 
   if (path === "/register-farmer" && req.method === "POST") {
     const b = await req.json();
-    const { password, ...rest } = b;
-    const { error } = await db.from("farmers").insert({ ...rest, password_hash: await hash(password, 10) });
+    const normalizedEmail = String(b.email || "").trim().toLowerCase();
+    const pwd = String(b.password || "");
+    const acreage = Number(b.acreage_planted);
+    if (!b.full_name || !b.phone_number || !normalizedEmail || !b.county || !b.ward || !b.specific_location || !b.potato_variety || !b.planting_date || !pwd || !b.confirm_password) {
+      return j({ error: "Missing required fields" }, 400);
+    }
+    if (!isEmail(normalizedEmail)) return j({ error: "Invalid email" }, 400);
+    if (pwd.length < 8) return j({ error: "Password must be at least 8 characters" }, 400);
+    if (pwd !== String(b.confirm_password)) return j({ error: "Passwords do not match" }, 400);
+    if (!Number.isFinite(acreage) || acreage <= 0) return j({ error: "Acreage must be greater than 0" }, 400);
+
+    const { data: existing } = await db.from("farmers").select("id").eq("email", normalizedEmail).maybeSingle();
+    if (existing) return j({ error: "An account with this email already exists" }, 409);
+
+    const paymentStatus = b.payment_status === "paid" || b.payment_status === "promo_code" ? b.payment_status : "pending";
+    const { error } = await db.from("farmers").insert({
+      full_name: String(b.full_name).trim(),
+      phone_number: String(b.phone_number).trim(),
+      email: normalizedEmail,
+      county: b.county,
+      ward: b.ward,
+      specific_location: b.specific_location,
+      potato_variety: b.potato_variety,
+      acreage_planted: acreage,
+      planting_date: b.planting_date,
+      payment_status: paymentStatus,
+      registration_status: "pending",
+      listing_status: "pending_approval",
+      registration_fee: paymentStatus === "promo_code" ? 0 : acreage * 2000,
+      password_hash: await hash(pwd, 10),
+    });
     if (error) return j({ error: error.message }, 400);
     return j({ ok: true });
+  }
+
+  if (path === "/buyer/profile/get" && req.method === "POST") {
+    const { buyer_id } = await req.json();
+    if (!buyer_id) return j({ error: "Missing buyer_id" }, 400);
+    const { data, error } = await db.from("buyers").select("*").eq("id", buyer_id).maybeSingle();
+    if (error) return j({ error: error.message }, 400);
+    return j({ data });
+  }
+
+  if (path === "/buyer/bookings" && req.method === "POST") {
+    const { buyer_id } = await req.json();
+    if (!buyer_id) return j({ error: "Missing buyer_id" }, 400);
+    const { data, error } = await db
+      .from("bookings")
+      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, farmers(full_name, county, phone_number, potato_variety)")
+      .eq("buyer_id", buyer_id)
+      .order("created_at", { ascending: false });
+    if (error) return j({ error: error.message }, 400);
+    return j({ data });
   }
 
   if (path === "/buyer/profile" && (req.method === "PATCH" || req.method === "POST")) {
@@ -157,6 +211,24 @@ Deno.serve(async (req) => {
     const { data, error } = await db.from("farmers").select("full_name, phone_number, email, county, ward, specific_location, potato_variety, acreage_planted").eq("id", farmer_id).maybeSingle();
     if (error) return j({ error: error.message }, 400);
     return j({ data });
+  }
+
+  if (path === "/farmer/dashboard" && req.method === "POST") {
+    const { farmer_id } = await req.json();
+    if (!farmer_id) return j({ error: "Missing farmer_id" }, 400);
+    const { data: farmer, error: farmerError } = await db
+      .from("farmers")
+      .select("registration_status, listing_status, full_name, phone_number, email, county, ward, specific_location, potato_variety, acreage_planted, planting_date")
+      .eq("id", farmer_id)
+      .maybeSingle();
+    if (farmerError) return j({ error: farmerError.message }, 400);
+    const { data: bookings, error: bookingsError } = await db
+      .from("bookings")
+      .select("id, acres_booked, total_amount, price_per_acre, payment_status, booking_status, created_at, buyer_id, buyers(buyer_name, phone_number, email, county)")
+      .eq("farmer_id", farmer_id)
+      .order("created_at", { ascending: false });
+    if (bookingsError) return j({ error: bookingsError.message }, 400);
+    return j({ farmer, bookings: bookings || [] });
   }
 if (path === "/farmer/profile" && req.method === "GET") {
     const farmer_id = url.searchParams.get("farmer_id");

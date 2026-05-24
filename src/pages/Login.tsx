@@ -3,24 +3,40 @@ import { Link, Navigate, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { getSession, saveSession } from "@/lib/auth";
+import { getSession, roleHome, saveSession, type AuthSession } from "@/lib/auth";
+import { supabase } from "@/integrations/supabase/client";
+import { toast } from "sonner";
 
 export default function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const session = getSession();
-  if (session) return <Navigate to={session.role === "admin" ? "/admin/dashboard" : session.role === "farmer" ? "/farmer/dashboard" : "/marketplace"} replace />;
+  if (session) return <Navigate to={roleHome(session.role)} replace />;
 
   const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    saveSession({
-      token: "demo-token",
-      role: "buyer",
-      userId: "demo-user",
-      email: email.trim().toLowerCase(),
+    setLoading(true);
+    const normalizedEmail = email.trim().toLowerCase();
+    const { data, error } = await supabase.functions.invoke<AuthSession & { error?: string }>("api-auth/login", {
+      body: { email: normalizedEmail, password },
     });
-    navigate("/marketplace");
+    setLoading(false);
+
+    if (error || data?.error || !data?.token || !data?.role || !data?.userId) {
+      toast.error(data?.error || error?.message || "Unable to sign in. Please check your credentials.");
+      return;
+    }
+
+    const sessionData: AuthSession = {
+      token: data.token,
+      role: data.role,
+      userId: data.userId,
+      email: data.email || normalizedEmail,
+    };
+    saveSession(sessionData);
+    navigate(roleHome(sessionData.role), { replace: true });
   };
 
   return (
@@ -34,7 +50,7 @@ export default function Login() {
           <form className="space-y-4" onSubmit={onSubmit}>
             <Input type="email" placeholder="Email" value={email} onChange={(e)=>setEmail(e.target.value)} required />
             <Input type="password" placeholder="Password" value={password} onChange={(e)=>setPassword(e.target.value)} required />
-            <Button className="w-full">Sign In</Button>
+            <Button className="w-full" disabled={loading}>{loading ? "Signing in..." : "Sign In"}</Button>
             <div className="text-sm space-y-1 text-center">
               <Link to="/register-farmer" className="underline block">Register as a farmer</Link>
               <Link to="/register-buyer" className="underline block">Register as a buyer</Link>

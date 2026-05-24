@@ -83,7 +83,9 @@ const FarmerRegistration = () => {
         potato_variety: form.potato_variety,
         acreage_planted: acreage,
         planting_date: form.planting_date,
-        payment_status: 'promo_code', password: form.password
+        payment_status: 'promo_code',
+        password: form.password,
+        confirm_password: form.confirm_password,
       }});
       setLoading(false);
 
@@ -120,7 +122,9 @@ const FarmerRegistration = () => {
               potato_variety: form.potato_variety,
               acreage_planted: acreage,
               planting_date: form.planting_date,
-              payment_status: 'paid', password: form.password
+              payment_status: 'paid',
+              password: form.password,
+              confirm_password: form.confirm_password,
             }});
 
             if (error) {
