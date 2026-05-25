@@ -2,11 +2,14 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
-import { getHashRouteUrl, roleHome, saveSession, type AuthSession } from "@/lib/auth";
+import { getAppBaseUrl, roleHome, saveSession, type AuthSession } from "@/lib/auth";
 import { toast } from "sonner";
 
 const routeTo = (path: string) => {
-  window.location.replace(getHashRouteUrl(path));
+  const url = new URL(getAppBaseUrl());
+  url.searchParams.set("auth_redirect", String(Date.now()));
+  url.hash = path;
+  window.location.replace(url.toString());
 };
 
 const getFunctionErrorMessage = async (error: unknown) => {
