@@ -9,6 +9,19 @@ const routeTo = (path: string) => {
   window.location.replace(getHashRouteUrl(path));
 };
 
+const getFunctionErrorMessage = async (error: unknown) => {
+  if (error && typeof error === "object" && "context" in error) {
+    const context = (error as { context?: unknown }).context;
+    if (context instanceof Response) {
+      try {
+        const body = await context.clone().json();
+        if (typeof body?.error === "string") return body.error;
+      } catch {}
+    }
+  }
+  return error instanceof Error ? error.message : "";
+};
+
 export default function AuthCallback() {
   const [message, setMessage] = useState("Finishing Google sign-in...");
   const [error, setError] = useState("");
@@ -52,7 +65,8 @@ export default function AuthCallback() {
 
         if (functionError || data?.error || !data?.token || !data?.role || !data?.userId) {
           await supabase.auth.signOut();
-          const friendlyMessage = data?.error || functionError?.message || "We could not match this Google account to a registered buyer or farmer.";
+          const functionMessage = await getFunctionErrorMessage(functionError);
+          const friendlyMessage = data?.error || functionMessage || "We could not match this Google account to a registered buyer or farmer.";
           throw new Error(friendlyMessage);
         }
 
