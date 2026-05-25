@@ -23,7 +23,9 @@ const queryClient = new QueryClient();
 
 const isOAuthCallbackPath = () => {
   const basePath = new URL(import.meta.env.BASE_URL, window.location.origin).pathname.replace(/\/$/, "");
-  return window.location.pathname === `${basePath}/auth/callback`;
+  const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const hasSupabaseHash = hashParams.has("access_token") || hashParams.has("error") || hashParams.has("error_description");
+  return hasSupabaseHash || window.location.pathname === `${basePath}/auth/callback`;
 };
 
 const App = () => {

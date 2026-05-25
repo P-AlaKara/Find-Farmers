@@ -70,7 +70,7 @@ To enable it:
 - In Google Cloud, add your app origin, for example `http://localhost:5173` and your production domain.
 - In Google Cloud, add the Supabase Google callback URL from Supabase Auth provider settings as an authorized redirect URI.
 - In Supabase Auth providers, enable Google and add the Google client ID and secret.
-- In Supabase Auth URL settings, allow the app callback URL, for example `http://localhost:5173/auth/callback` and the production equivalent.
+- In Supabase Auth URL settings, allow the app URL, for example `http://localhost:5173/` and the production equivalent. The app detects Supabase's OAuth token hash at the root URL before the hash router runs.
 - For local Supabase CLI, set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; `supabase/config.toml` reads those values for `[auth.external.google]`.
 
 ## How can I deploy this project?
