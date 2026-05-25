@@ -97,17 +97,17 @@ Deno.serve(async (req) => {
     if (buyerError) return j({ error: buyerError.message }, 400);
 
     if (farmer && buyer) {
-      return j({ error: "This Google email is linked to both a farmer and buyer account. Please contact support so we can resolve the duplicate account." }, 409);
+      return j({ error: "This Google email is linked to both a farmer and buyer account. Please contact support so we can resolve the duplicate account." });
     }
     if (farmer) return j({ token: gen(), role: "farmer", userId: farmer.id, email: farmer.email });
     if (buyer) {
       if (buyer.account_status && buyer.account_status !== "active") {
-        return j({ error: "Please complete your buyer account setup before signing in with Google." }, 403);
+        return j({ error: "Please complete your buyer account setup before signing in with Google." });
       }
       return j({ token: gen(), role: "buyer", userId: buyer.id, email: buyer.email });
     }
 
-    return j({ error: "No buyer or farmer account exists for this Google email. Please register first." }, 404);
+    return j({ error: "No buyer or farmer account exists for this Google email. Please register first." });
   }
 
   if (path === "/validate-token") {
