@@ -18,10 +18,24 @@ export default function AuthCallback() {
 
     const completeSignIn = async () => {
       try {
+        const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+        const oauthError = hashParams.get("error_description") || hashParams.get("error");
+        if (oauthError) throw new Error(oauthError);
+
         const code = new URLSearchParams(window.location.search).get("code");
         if (code) {
           const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
           if (exchangeError) throw exchangeError;
+        }
+
+        const hashAccessToken = hashParams.get("access_token");
+        const hashRefreshToken = hashParams.get("refresh_token");
+        if (hashAccessToken && hashRefreshToken) {
+          const { error: setSessionError } = await supabase.auth.setSession({
+            access_token: hashAccessToken,
+            refresh_token: hashRefreshToken,
+          });
+          if (setSessionError) throw setSessionError;
         }
 
         const { data: sessionData, error: sessionError } = await supabase.auth.getSession();

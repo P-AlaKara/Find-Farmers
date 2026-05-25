@@ -35,8 +35,7 @@ export const signOut = async () => {
 export const getAppBaseUrl = () => new URL(import.meta.env.BASE_URL, window.location.origin).toString();
 
 export const getOAuthCallbackUrl = () => {
-  const baseUrl = getAppBaseUrl().replace(/\/$/, "");
-  return `${baseUrl}/auth/callback`;
+  return getAppBaseUrl();
 };
 
 export const getHashRouteUrl = (path: string) => `${getAppBaseUrl()}#${path}`;
