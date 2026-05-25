@@ -17,27 +17,41 @@ import FarmerSettings from "./pages/FarmerSettings";
 import BuyerBookings from "./pages/BuyerBookings";
 import BuyerSettings from "./pages/BuyerSettings";
 import ProtectedRoute from "./components/ProtectedRoute";
+import AuthCallback from "./pages/AuthCallback";
 
 const queryClient = new QueryClient();
 
-const App = () => (
-  <QueryClientProvider client={queryClient}><TooltipProvider><Toaster /><Sonner />
+const isOAuthCallbackPath = () => {
+  const basePath = new URL(import.meta.env.BASE_URL, window.location.origin).pathname.replace(/\/$/, "");
+  return window.location.pathname === `${basePath}/auth/callback`;
+};
+
+const App = () => {
+  const content = isOAuthCallbackPath() ? (
+    <AuthCallback />
+  ) : (
     <HashRouter><Routes>
-      <Route path="/" element={<Home />} />
-      <Route path="/marketplace" element={<Marketplace />} />
-      <Route path="/register-farmer" element={<FarmerRegistration />} />
-      <Route path="/register-buyer" element={<BuyerRegistration />} />
-      <Route path="/payment-success" element={<PaymentSuccess />} />
-      <Route path="/login" element={<Login />} />
-      <Route path="/setup-account" element={<SetupAccount />} />
-      <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
-      <Route path="/farmer/dashboard" element={<ProtectedRoute role="farmer"><FarmerDashboard /></ProtectedRoute>} />
-      <Route path="/farmer/settings" element={<ProtectedRoute role="farmer"><FarmerSettings /></ProtectedRoute>} />
-      <Route path="/buyer/bookings" element={<ProtectedRoute role="buyer"><BuyerBookings /></ProtectedRoute>} />
-      <Route path="/buyer/settings" element={<ProtectedRoute role="buyer"><BuyerSettings /></ProtectedRoute>} />
-      <Route path="*" element={<NotFound />} />
-    </Routes></HashRouter>
-  </TooltipProvider></QueryClientProvider>
-);
+    <Route path="/" element={<Home />} />
+    <Route path="/marketplace" element={<Marketplace />} />
+    <Route path="/register-farmer" element={<FarmerRegistration />} />
+    <Route path="/register-buyer" element={<BuyerRegistration />} />
+    <Route path="/payment-success" element={<PaymentSuccess />} />
+    <Route path="/login" element={<Login />} />
+    <Route path="/setup-account" element={<SetupAccount />} />
+    <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
+    <Route path="/farmer/dashboard" element={<ProtectedRoute role="farmer"><FarmerDashboard /></ProtectedRoute>} />
+    <Route path="/farmer/settings" element={<ProtectedRoute role="farmer"><FarmerSettings /></ProtectedRoute>} />
+    <Route path="/buyer/bookings" element={<ProtectedRoute role="buyer"><BuyerBookings /></ProtectedRoute>} />
+    <Route path="/buyer/settings" element={<ProtectedRoute role="buyer"><BuyerSettings /></ProtectedRoute>} />
+    <Route path="*" element={<NotFound />} />
+  </Routes></HashRouter>
+  );
+
+  return (
+    <QueryClientProvider client={queryClient}><TooltipProvider><Toaster /><Sonner />
+      {content}
+    </TooltipProvider></QueryClientProvider>
+  );
+};
 
 export default App;

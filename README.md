@@ -60,6 +60,19 @@ This project is built with:
 - shadcn-ui
 - Tailwind CSS
 
+## Google sign-in setup
+
+Google sign-in is implemented through Supabase Auth and then mapped back to the app's existing buyer/farmer session model.
+
+To enable it:
+
+- Create a Google Cloud OAuth Web client.
+- In Google Cloud, add your app origin, for example `http://localhost:5173` and your production domain.
+- In Google Cloud, add the Supabase Google callback URL from Supabase Auth provider settings as an authorized redirect URI.
+- In Supabase Auth providers, enable Google and add the Google client ID and secret.
+- In Supabase Auth URL settings, allow the app callback URL, for example `http://localhost:5173/auth/callback` and the production equivalent.
+- For local Supabase CLI, set `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`; `supabase/config.toml` reads those values for `[auth.external.google]`.
+
 ## How can I deploy this project?
 
 Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.

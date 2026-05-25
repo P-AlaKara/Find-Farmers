@@ -1,5 +1,13 @@
 project_id = "hcfcpqlcawbpqtruttsi"
 
+[auth.external.google]
+enabled = true
+client_id = "env(GOOGLE_CLIENT_ID)"
+secret = "env(GOOGLE_CLIENT_SECRET)"
+
+[functions.api-auth]
+verify_jwt = false
+
 [functions.external-get-farmers]
 verify_jwt = false
 
