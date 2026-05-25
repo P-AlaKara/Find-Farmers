@@ -65,6 +65,51 @@ Deno.serve(async (req) => {
     return authError("Invalid email or password");
   }
 
+  if (path === "/oauth/google-session" && req.method === "POST") {
+    const authHeader = req.headers.get("authorization") || "";
+    const accessToken = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!accessToken) return j({ error: "Missing Google sign-in token" }, 401);
+
+    const { data: userData, error: userError } = await db.auth.getUser(accessToken);
+    const user = userData?.user;
+    if (userError || !user) return j({ error: "Google sign-in could not be verified" }, 401);
+
+    const provider = String(user.app_metadata?.provider || "");
+    const providers = Array.isArray(user.app_metadata?.providers) ? user.app_metadata.providers.map(String) : [];
+    const signedInWithGoogle = provider === "google" || providers.includes("google") || user.identities?.some((identity) => identity.provider === "google");
+    if (!signedInWithGoogle) return j({ error: "Please sign in with Google to continue" }, 401);
+
+    const normalizedEmail = String(user.email || "").trim().toLowerCase();
+    if (!normalizedEmail || !isEmail(normalizedEmail)) return j({ error: "Google did not return a valid email address" }, 400);
+
+    const { data: farmer, error: farmerError } = await db
+      .from("farmers")
+      .select("id,email")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+    if (farmerError) return j({ error: farmerError.message }, 400);
+
+    const { data: buyer, error: buyerError } = await db
+      .from("buyers")
+      .select("id,email,account_status")
+      .eq("email", normalizedEmail)
+      .maybeSingle();
+    if (buyerError) return j({ error: buyerError.message }, 400);
+
+    if (farmer && buyer) {
+      return j({ error: "This Google email is linked to both a farmer and buyer account. Please contact support so we can resolve the duplicate account." }, 409);
+    }
+    if (farmer) return j({ token: gen(), role: "farmer", userId: farmer.id, email: farmer.email });
+    if (buyer) {
+      if (buyer.account_status && buyer.account_status !== "active") {
+        return j({ error: "Please complete your buyer account setup before signing in with Google." }, 403);
+      }
+      return j({ token: gen(), role: "buyer", userId: buyer.id, email: buyer.email });
+    }
+
+    return j({ error: "No buyer or farmer account exists for this Google email. Please register first." }, 404);
+  }
+
   if (path === "/validate-token") {
     const t = url.searchParams.get("token");
     const { data } = await db.from("buyers").select("id").eq("setup_token", t).gt("setup_token_expires_at", new Date().toISOString()).maybeSingle();

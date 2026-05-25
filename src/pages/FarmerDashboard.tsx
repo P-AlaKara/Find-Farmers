@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { getSession, clearSession } from "@/lib/auth";
+import { getSession, signOut } from "@/lib/auth";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -73,7 +73,7 @@ export default function FarmerDashboard() {
         </div>
         <div className="flex gap-2">
           <Button asChild variant="outline"><Link to="/farmer/settings">Profile & Settings</Link></Button>
-          <Button variant="destructive" onClick={() => { clearSession(); navigate("/login"); }}>Logout</Button>
+          <Button variant="destructive" onClick={async () => { await signOut(); navigate("/login"); }}>Logout</Button>
         </div>
       </div>
 

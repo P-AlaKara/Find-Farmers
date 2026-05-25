@@ -1,3 +1,5 @@
+import { supabase } from "@/integrations/supabase/client";
+
 export type UserRole = "admin" | "farmer" | "buyer";
 
 export interface AuthSession {
@@ -24,3 +26,17 @@ export const getSession = (): AuthSession | null => {
   try { return JSON.parse(raw) as AuthSession; } catch { return null; }
 };
 export const clearSession = () => localStorage.removeItem(KEY);
+
+export const signOut = async () => {
+  clearSession();
+  await supabase.auth.signOut();
+};
+
+export const getAppBaseUrl = () => new URL(import.meta.env.BASE_URL, window.location.origin).toString();
+
+export const getOAuthCallbackUrl = () => {
+  const baseUrl = getAppBaseUrl().replace(/\/$/, "");
+  return `${baseUrl}/auth/callback`;
+};
+
+export const getHashRouteUrl = (path: string) => `${getAppBaseUrl()}#${path}`;

@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from "react";
-import { clearSession, getSession } from "@/lib/auth";
+import { getSession, signOut } from "@/lib/auth";
 import { useNavigate } from "react-router-dom";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -131,7 +131,7 @@ const AdminDashboard = () => {
     },
   });
 
-  const handleLogout = async () => { clearSession(); navigate("/login"); };
+  const handleLogout = async () => { await signOut(); navigate("/login"); };
 
   const openEditFarmer = (f: DbTables<"farmers">) => {
     setFarmerForm({ full_name: f.full_name, phone_number: f.phone_number, email: f.email || "", county: f.county, ward: f.ward, specific_location: f.specific_location, potato_variety: f.potato_variety, acreage_planted: f.acreage_planted });
