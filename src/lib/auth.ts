@@ -12,7 +12,7 @@ export interface AuthSession {
 export const roleHome = (role: UserRole) => {
   if (role === "admin") return "/admin/dashboard";
   if (role === "farmer") return "/farmer/dashboard";
-  return "/marketplace";
+  return "/buyer/dashboard";
 };
 
 // Single auth path for runtime: custom api-auth + local session storage.

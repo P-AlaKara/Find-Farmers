@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
-import { Sprout, Users, ShoppingCart, LogOut, CheckCircle, XCircle, DollarSign, Pencil, Trash2 } from "lucide-react";
+import { Sprout, Users, ShoppingCart, LogOut, CheckCircle, XCircle, DollarSign, Pencil, Trash2, AlertCircle } from "lucide-react";
 import { format } from "date-fns";
 import { BarChart, Bar, CartesianGrid, XAxis, YAxis, Tooltip, PieChart, Pie, Cell, LineChart, Line, ResponsiveContainer } from "recharts";
 import type { Tables as DbTables } from "@/integrations/supabase/types";
@@ -36,6 +36,7 @@ const AdminDashboard = () => {
   const [farmerFilters, setFarmerFilters] = useState({ search: "", status: "all", county: "all" });
   const [bookingFilters, setBookingFilters] = useState({ search: "", status: "all", payment: "all" });
   const [buyerFilters, setBuyerFilters] = useState({ search: "", county: "all" });
+  const [complaintFilters, setComplaintFilters] = useState({ search: "", status: "all" });
 
   useEffect(() => {
     const session = getSession();
@@ -67,6 +68,16 @@ const AdminDashboard = () => {
     queryFn: async () => {
       const session = getSession();
       const { data, error } = await supabase.functions.invoke("api-auth/admin/bookings", { body: { admin_id: session?.userId } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+      return data?.data || [];
+    },
+  });
+
+  const { data: complaints = [] } = useQuery({
+    queryKey: ["admin-complaints"],
+    queryFn: async () => {
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/complaints", { body: { admin_id: session?.userId } });
       if (error || data?.error) throw new Error(data?.error || error?.message);
       return data?.data || [];
     },
@@ -131,6 +142,18 @@ const AdminDashboard = () => {
     },
   });
 
+  const updateComplaint = useMutation({
+    mutationFn: async ({ id, status }: { id: string; status: "open" | "in_review" | "resolved" }) => {
+      const session = getSession();
+      const { data, error } = await supabase.functions.invoke("api-auth/admin/complaint/update", { body: { admin_id: session?.userId, id, status } });
+      if (error || data?.error) throw new Error(data?.error || error?.message);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["admin-complaints"] });
+      toast.success("Complaint updated");
+    },
+  });
+
   const handleLogout = async () => { await signOut(); navigate("/login"); };
 
   const openEditFarmer = (f: DbTables<"farmers">) => {
@@ -182,8 +205,21 @@ const AdminDashboard = () => {
     return true;
   }), [buyers, buyerFilters]);
 
+  const filteredComplaints = useMemo(() => complaints.filter((c: any) => {
+    const q = complaintFilters.search.trim().toLowerCase();
+    if (q && !(
+      String(c.subject || "").toLowerCase().includes(q) ||
+      String(c.content || "").toLowerCase().includes(q) ||
+      String(c.buyers?.buyer_name || "").toLowerCase().includes(q) ||
+      String(c.bookings?.id || "").toLowerCase().includes(q)
+    )) return false;
+    if (complaintFilters.status !== "all" && c.status !== complaintFilters.status) return false;
+    return true;
+  }), [complaints, complaintFilters]);
+
   const pendingFarmers = farmers.filter((f) => f.registration_status === "pending").length;
   const pendingBookings = bookings.filter((b: any) => b.booking_status === "pending_approval").length;
+  const openComplaints = complaints.filter((c: any) => c.status === "open").length;
 
   // Revenue split: exclude promo registrations from farmer revenue
   const farmerRevenue = farmers
@@ -210,7 +246,7 @@ const AdminDashboard = () => {
 
       <div className="container py-8">
         {/* Summary Cards */}
-        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-6">
           <Card>
             <CardContent className="flex items-center gap-4 p-6">
               <div className="rounded-full bg-primary/10 p-3"><Sprout className="h-6 w-6 text-primary" /></div>
@@ -258,9 +294,18 @@ const AdminDashboard = () => {
               <p className="text-xs text-muted-foreground mt-1">Not counted in revenue</p>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent className="flex items-center gap-4 p-6">
+              <div className="rounded-full bg-amber-500/10 p-3"><AlertCircle className="h-6 w-6 text-amber-600" /></div>
+              <div>
+                <p className="text-sm text-muted-foreground">Open Complaints</p>
+                <p className="text-2xl font-bold">{openComplaints}</p>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
-        <div className="mb-4 flex justify-end"><Button variant="outline" onClick={() => { queryClient.invalidateQueries({ queryKey: ["admin-farmers"] }); queryClient.invalidateQueries({ queryKey: ["admin-buyers"] }); queryClient.invalidateQueries({ queryKey: ["admin-bookings"] }); }}>Refresh</Button></div>
+        <div className="mb-4 flex justify-end"><Button variant="outline" onClick={() => { queryClient.invalidateQueries({ queryKey: ["admin-farmers"] }); queryClient.invalidateQueries({ queryKey: ["admin-buyers"] }); queryClient.invalidateQueries({ queryKey: ["admin-bookings"] }); queryClient.invalidateQueries({ queryKey: ["admin-complaints"] }); }}>Refresh</Button></div>
 
         <Tabs defaultValue="analytics">
           <TabsList>
@@ -268,6 +313,7 @@ const AdminDashboard = () => {
             <TabsTrigger value="farmers">Farmers ({filteredFarmers.length}/{farmers.length})</TabsTrigger>
             <TabsTrigger value="bookings">Bookings ({filteredBookings.length}/{bookings.length})</TabsTrigger>
             <TabsTrigger value="buyers">Buyers ({filteredBuyers.length}/{buyers.length})</TabsTrigger>
+            <TabsTrigger value="complaints">Complaints ({filteredComplaints.length}/{complaints.length})</TabsTrigger>
           </TabsList>
 
 
@@ -454,6 +500,61 @@ const AdminDashboard = () => {
                           </Button>
                         </div>
                       </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+
+          <TabsContent value="complaints">
+            <div className="mb-3 flex flex-wrap gap-2">
+              <Input className="w-64" placeholder="Search buyer/subject/booking" value={complaintFilters.search} onChange={(e)=>setComplaintFilters((p)=>({...p,search:e.target.value}))} />
+              <Select value={complaintFilters.status} onValueChange={(v)=>setComplaintFilters((p)=>({...p,status:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="all">All statuses</SelectItem><SelectItem value="open">Open</SelectItem><SelectItem value="in_review">In review</SelectItem><SelectItem value="resolved">Resolved</SelectItem></SelectContent></Select>
+            </div>
+            <div className="rounded-lg border overflow-x-auto max-h-[500px] overflow-y-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Buyer</TableHead>
+                    <TableHead>Booking</TableHead>
+                    <TableHead>Subject</TableHead>
+                    <TableHead>Content</TableHead>
+                    <TableHead>Status</TableHead>
+                    <TableHead>Submitted</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {filteredComplaints.map((c: any) => (
+                    <TableRow key={c.id}>
+                      <TableCell>
+                        <div>{c.buyers?.buyer_name || "-"}</div>
+                        <div className="text-xs text-muted-foreground">{c.buyers?.phone_number}<br />{c.buyers?.email}</div>
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {c.bookings?.id ? (
+                          <>
+                            <div className="font-mono">{String(c.bookings.id).slice(0, 8)}</div>
+                            <div>{c.bookings?.farmers?.farmer_id || c.bookings?.farmers?.full_name || ""}</div>
+                          </>
+                        ) : "-"}
+                      </TableCell>
+                      <TableCell className="font-medium">{c.subject}</TableCell>
+                      <TableCell className="max-w-xs text-sm text-muted-foreground">{String(c.content || "").slice(0, 180)}{String(c.content || "").length > 180 ? "..." : ""}</TableCell>
+                      <TableCell>
+                        <Select
+                          value={c.status}
+                          onValueChange={(v) => updateComplaint.mutate({ id: c.id, status: v as "open" | "in_review" | "resolved" })}
+                        >
+                          <SelectTrigger className="w-32 h-8 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="open">Open</SelectItem>
+                            <SelectItem value="in_review">In review</SelectItem>
+                            <SelectItem value="resolved">Resolved</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </TableCell>
+                      <TableCell className="text-xs">{format(new Date(c.created_at), "dd MMM yy")}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

@@ -16,6 +16,7 @@ import FarmerDashboard from "./pages/FarmerDashboard";
 import FarmerSettings from "./pages/FarmerSettings";
 import BuyerBookings from "./pages/BuyerBookings";
 import BuyerSettings from "./pages/BuyerSettings";
+import BuyerDashboard from "./pages/BuyerDashboard";
 import ProtectedRoute from "./components/ProtectedRoute";
 import AuthCallback from "./pages/AuthCallback";
 
@@ -43,6 +44,7 @@ const App = () => {
     <Route path="/admin/dashboard" element={<ProtectedRoute role="admin"><AdminDashboard /></ProtectedRoute>} />
     <Route path="/farmer/dashboard" element={<ProtectedRoute role="farmer"><FarmerDashboard /></ProtectedRoute>} />
     <Route path="/farmer/settings" element={<ProtectedRoute role="farmer"><FarmerSettings /></ProtectedRoute>} />
+    <Route path="/buyer/dashboard" element={<ProtectedRoute role="buyer"><BuyerDashboard /></ProtectedRoute>} />
     <Route path="/buyer/bookings" element={<ProtectedRoute role="buyer"><BuyerBookings /></ProtectedRoute>} />
     <Route path="/buyer/settings" element={<ProtectedRoute role="buyer"><BuyerSettings /></ProtectedRoute>} />
     <Route path="*" element={<NotFound />} />

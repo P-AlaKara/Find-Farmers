@@ -17,6 +17,11 @@ async function isAdmin(db: ReturnType<typeof sb>, admin_id?: string) {
   return Boolean(data);
 }
 
+const isValidDate = (value: unknown) => {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  return !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime());
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
 
@@ -232,11 +237,111 @@ Deno.serve(async (req) => {
     if (!buyer_id) return j({ error: "Missing buyer_id" }, 400);
     const { data, error } = await db
       .from("bookings")
-      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, farmers(full_name, county, phone_number, potato_variety)")
+      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, received_confirmed_at, final_price, delivery_date, buyer_rating, farmers(full_name, county, phone_number, potato_variety)")
       .eq("buyer_id", buyer_id)
       .order("created_at", { ascending: false });
     if (error) return j({ error: error.message }, 400);
     return j({ data });
+  }
+
+  if (path === "/buyer/dashboard" && req.method === "POST") {
+    const { buyer_id } = await req.json();
+    if (!buyer_id) return j({ error: "Missing buyer_id" }, 400);
+
+    const { data: profile, error: profileError } = await db.from("buyers").select("*").eq("id", buyer_id).maybeSingle();
+    if (profileError) return j({ error: profileError.message }, 400);
+    if (!profile) return j({ error: "Buyer not found" }, 404);
+
+    const { data: bookings, error: bookingsError } = await db
+      .from("bookings")
+      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, received_confirmed_at, final_price, delivery_date, buyer_rating, farmers(full_name, county, phone_number, potato_variety, farmer_id)")
+      .eq("buyer_id", buyer_id)
+      .order("created_at", { ascending: false });
+    if (bookingsError) return j({ error: bookingsError.message }, 400);
+
+    const { data: complaints, error: complaintsError } = await db
+      .from("buyer_complaints")
+      .select("id, buyer_id, booking_id, subject, content, status, created_at, updated_at, bookings(id, farmers(full_name, farmer_id))")
+      .eq("buyer_id", buyer_id)
+      .order("created_at", { ascending: false });
+    if (complaintsError) return j({ error: complaintsError.message }, 400);
+
+    const allBookings = bookings || [];
+    return j({
+      data: {
+        profile,
+        activeBookings: allBookings.filter((b) => b.booking_status === "confirmed" && !b.received_confirmed_at),
+        pendingBookings: allBookings.filter((b) => b.booking_status === "pending_approval" || b.booking_status === "approved"),
+        historicalBookings: allBookings.filter((b) => Boolean(b.received_confirmed_at) || b.booking_status === "rejected"),
+        complaints: complaints || [],
+      },
+    });
+  }
+
+  if (path === "/buyer/booking/confirm-received" && req.method === "POST") {
+    const { buyer_id, booking_id, final_price, delivery_date, buyer_rating } = await req.json();
+    if (!buyer_id || !booking_id) return j({ error: "Missing buyer_id or booking_id" }, 400);
+
+    const price = Number(final_price);
+    const rating = Number(buyer_rating);
+    if (!Number.isFinite(price) || price <= 0) return j({ error: "Final price must be greater than 0" }, 400);
+    if (!isValidDate(delivery_date)) return j({ error: "Delivery date must be a valid date" }, 400);
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) return j({ error: "Rating must be between 1 and 5" }, 400);
+
+    const { data: booking, error: fetchError } = await db
+      .from("bookings")
+      .select("id, buyer_id, booking_status, received_confirmed_at")
+      .eq("id", booking_id)
+      .eq("buyer_id", buyer_id)
+      .maybeSingle();
+    if (fetchError) return j({ error: fetchError.message }, 400);
+    if (!booking) return j({ error: "Booking not found" }, 404);
+    if (booking.booking_status !== "confirmed") return j({ error: "Only confirmed bookings can be marked as received" }, 400);
+    if (booking.received_confirmed_at) return j({ error: "This booking has already been marked as received" }, 409);
+
+    const { data, error } = await db
+      .from("bookings")
+      .update({
+        final_price: price,
+        delivery_date,
+        buyer_rating: rating,
+        received_confirmed_at: new Date().toISOString(),
+      })
+      .eq("id", booking_id)
+      .eq("buyer_id", buyer_id)
+      .select("id, received_confirmed_at, final_price, delivery_date, buyer_rating")
+      .single();
+    if (error) return j({ error: error.message }, 400);
+    return j({ ok: true, data });
+  }
+
+  if (path === "/buyer/complaints/create" && req.method === "POST") {
+    const { buyer_id, booking_id, subject, content } = await req.json();
+    const cleanSubject = String(subject || "").trim();
+    const cleanContent = String(content || "").trim();
+    if (!buyer_id) return j({ error: "Missing buyer_id" }, 400);
+    if (!cleanSubject || !cleanContent) return j({ error: "Subject and content are required" }, 400);
+
+    let complaintBookingId: string | null = null;
+    if (booking_id) {
+      const { data: booking, error: bookingError } = await db
+        .from("bookings")
+        .select("id")
+        .eq("id", booking_id)
+        .eq("buyer_id", buyer_id)
+        .maybeSingle();
+      if (bookingError) return j({ error: bookingError.message }, 400);
+      if (!booking) return j({ error: "Selected booking was not found" }, 404);
+      complaintBookingId = booking.id;
+    }
+
+    const { data, error } = await db
+      .from("buyer_complaints")
+      .insert({ buyer_id, booking_id: complaintBookingId, subject: cleanSubject, content: cleanContent })
+      .select("id, buyer_id, booking_id, subject, content, status, created_at, updated_at")
+      .single();
+    if (error) return j({ error: error.message }, 400);
+    return j({ ok: true, data });
   }
 
   if (path === "/buyer/profile" && (req.method === "PATCH" || req.method === "POST")) {
@@ -343,6 +448,17 @@ if (path === "/farmer/profile" && req.method === "GET") {
     return j({ data });
   }
 
+  if (path === "/admin/complaints" && req.method === "POST") {
+    const { admin_id } = await req.json();
+    if (!(await isAdmin(db, admin_id))) return j({ error: "Unauthorized" }, 403);
+    const { data, error } = await db
+      .from("buyer_complaints")
+      .select("*, buyers(buyer_name, phone_number, email, county), bookings(id, acres_booked, booking_status, farmers(farmer_id, full_name, phone_number, county))")
+      .order("created_at", { ascending: false });
+    if (error) return j({ error: error.message }, 400);
+    return j({ data });
+  }
+
   if (path === "/admin/farmer/update" && req.method === "POST") {
     const { admin_id, id, updates } = await req.json();
     if (!(await isAdmin(db, admin_id))) return j({ error: "Unauthorized" }, 403);
@@ -391,6 +507,16 @@ if (path === "/farmer/profile" && req.method === "GET") {
     const { admin_id, id } = await req.json();
     if (!(await isAdmin(db, admin_id))) return j({ error: "Unauthorized" }, 403);
     const { error } = await db.from("buyers").delete().eq("id", id);
+    if (error) return j({ error: error.message }, 400);
+    return j({ ok: true });
+  }
+
+  if (path === "/admin/complaint/update" && req.method === "POST") {
+    const { admin_id, id, status } = await req.json();
+    if (!(await isAdmin(db, admin_id))) return j({ error: "Unauthorized" }, 403);
+    if (!id) return j({ error: "Missing complaint id" }, 400);
+    if (!["open", "in_review", "resolved"].includes(status)) return j({ error: "Invalid complaint status" }, 400);
+    const { error } = await db.from("buyer_complaints").update({ status }).eq("id", id);
     if (error) return j({ error: error.message }, 400);
     return j({ ok: true });
   }
