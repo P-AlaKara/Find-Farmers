@@ -42,11 +42,15 @@ export type Database = {
           buyer_id: string
           callback_url: string | null
           created_at: string
+          buyer_rating: number | null
+          delivery_date: string | null
           farmer_id: string
+          final_price: number | null
           id: string
           payment_reference: string | null
           payment_status: Database["public"]["Enums"]["payment_status"]
           price_per_acre: number
+          received_confirmed_at: string | null
           total_amount: number | null
           updated_at: string
         }
@@ -56,11 +60,15 @@ export type Database = {
           buyer_id: string
           callback_url?: string | null
           created_at?: string
+          buyer_rating?: number | null
+          delivery_date?: string | null
           farmer_id: string
+          final_price?: number | null
           id?: string
           payment_reference?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
           price_per_acre?: number
+          received_confirmed_at?: string | null
           total_amount?: number | null
           updated_at?: string
         }
@@ -70,11 +78,15 @@ export type Database = {
           buyer_id?: string
           callback_url?: string | null
           created_at?: string
+          buyer_rating?: number | null
+          delivery_date?: string | null
           farmer_id?: string
+          final_price?: number | null
           id?: string
           payment_reference?: string | null
           payment_status?: Database["public"]["Enums"]["payment_status"]
           price_per_acre?: number
+          received_confirmed_at?: string | null
           total_amount?: number | null
           updated_at?: string
         }
@@ -91,6 +103,54 @@ export type Database = {
             columns: ["farmer_id"]
             isOneToOne: false
             referencedRelation: "farmers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      buyer_complaints: {
+        Row: {
+          booking_id: string | null
+          buyer_id: string
+          content: string
+          created_at: string
+          id: string
+          status: string
+          subject: string
+          updated_at: string
+        }
+        Insert: {
+          booking_id?: string | null
+          buyer_id: string
+          content: string
+          created_at?: string
+          id?: string
+          status?: string
+          subject: string
+          updated_at?: string
+        }
+        Update: {
+          booking_id?: string | null
+          buyer_id?: string
+          content?: string
+          created_at?: string
+          id?: string
+          status?: string
+          subject?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "buyer_complaints_booking_id_fkey"
+            columns: ["booking_id"]
+            isOneToOne: false
+            referencedRelation: "bookings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "buyer_complaints_buyer_id_fkey"
+            columns: ["buyer_id"]
+            isOneToOne: false
+            referencedRelation: "buyers"
             referencedColumns: ["id"]
           },
         ]
