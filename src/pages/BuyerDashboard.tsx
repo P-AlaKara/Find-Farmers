@@ -10,11 +10,23 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "sonner";
-import { AlertCircle, CheckCircle2, Edit3, RefreshCw, Star } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowUpRight,
+  CheckCircle2,
+  Clock3,
+  FileClock,
+  History,
+  Leaf,
+  PackageCheck,
+  RefreshCw,
+  ShoppingCart,
+  Star,
+  User,
+} from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { getSession } from "@/lib/auth";
 import { validateComplaint, validateReceiptConfirmation } from "@/lib/buyerDashboard";
-import { KENYA_COUNTIES } from "@/data/kenyaLocations";
 
 type BuyerProfile = {
   buyer_name: string | null;
@@ -55,11 +67,11 @@ type Complaint = {
   bookings?: { id: string; farmers?: { full_name: string | null; farmer_id: string | null } | null } | null;
 };
 
-const BUSINESS_TYPES = ["Offtaker / Bulk Buyer", "Processor", "Hotel", "School / Institution", "Supermarket / Retailer", "Exporter", "Trader / Reseller", "Other"];
 const fmtKES = (n: number | null | undefined) => `KES ${Number(n || 0).toLocaleString()}`;
 const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) : "-";
 
 const statusVariant = (status: string) => status === "confirmed" || status === "resolved" ? "default" : status === "rejected" ? "destructive" : "secondary";
+const prettyStatus = (status: string) => status.replace(/_/g, " ");
 
 export default function BuyerDashboard() {
   const session = getSession();
@@ -70,7 +82,6 @@ export default function BuyerDashboard() {
   const [pendingBookings, setPendingBookings] = useState<Booking[]>([]);
   const [historicalBookings, setHistoricalBookings] = useState<Booking[]>([]);
   const [complaints, setComplaints] = useState<Complaint[]>([]);
-  const [profileSaving, setProfileSaving] = useState(false);
   const [receiptBooking, setReceiptBooking] = useState<Booking | null>(null);
   const [receiptForm, setReceiptForm] = useState({ finalPrice: "", deliveryDate: "", rating: "5" });
   const [receiptSaving, setReceiptSaving] = useState(false);
@@ -98,33 +109,13 @@ export default function BuyerDashboard() {
 
   const allBookings = useMemo(() => [...activeBookings, ...pendingBookings, ...historicalBookings], [activeBookings, pendingBookings, historicalBookings]);
   const openComplaints = complaints.filter((complaint) => complaint.status === "open").length;
+  const displayName = profile?.contact_full_name || profile?.company_name || profile?.buyer_name || "Buyer";
+  const companyName = profile?.company_name || profile?.buyer_name || "Buyer workspace";
+  const locationLabel = profile?.primary_town && (profile?.primary_county || profile?.county)
+    ? `${profile.primary_town}, ${profile.primary_county || profile.county}`
+    : profile?.primary_county || profile?.county || "Procurement coverage";
 
   if (!session || session.role !== "buyer") return <Navigate to="/login" replace />;
-
-  const updateProfile = (key: keyof BuyerProfile, value: string) => setProfile((current) => current ? { ...current, [key]: value } : current);
-
-  const saveProfile = async () => {
-    if (!profile) return;
-    setProfileSaving(true);
-    const { data, error } = await supabase.functions.invoke("api-auth/buyer/profile", {
-      body: {
-        buyer_id: buyerId,
-        buyer_name: profile.company_name || profile.buyer_name,
-        company_name: profile.company_name,
-        business_type: profile.business_type,
-        contact_full_name: profile.contact_full_name,
-        contact_role: profile.contact_role,
-        phone_number: profile.phone_number,
-        county: profile.primary_county || profile.county,
-        primary_county: profile.primary_county,
-        primary_town: profile.primary_town,
-        additional_notes: profile.additional_notes,
-      },
-    });
-    setProfileSaving(false);
-    if (error || data?.error) toast.error(data?.error || "Failed to save profile");
-    else toast.success("Profile updated");
-  };
 
   const openReceiptDialog = (booking: Booking) => {
     setReceiptBooking(booking);
@@ -189,36 +180,49 @@ export default function BuyerDashboard() {
 
   const BookingCards = ({ rows, action }: { rows: Booking[]; action?: (booking: Booking) => JSX.Element }) => (
     rows.length === 0 ? (
-      <Card><CardContent className="py-10 text-center text-muted-foreground">No bookings in this section.</CardContent></Card>
+      <Card className="border-dashed bg-white/80 shadow-sm">
+        <CardContent className="flex min-h-[220px] flex-col items-center justify-center gap-3 py-10 text-center">
+          <div className="rounded-full bg-emerald-50 p-3 text-primary"><PackageCheck className="h-6 w-6" /></div>
+          <div>
+            <p className="font-semibold text-slate-900">No bookings in this section</p>
+            <p className="mt-1 text-sm text-muted-foreground">New procurement activity will appear here when available.</p>
+          </div>
+        </CardContent>
+      </Card>
     ) : (
       <div className="grid gap-4">
         {rows.map((booking) => (
-          <Card key={booking.id}>
-            <CardContent className="p-5">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
-                  <div className="text-sm text-muted-foreground">Booking Ref</div>
-                  <div className="font-mono text-sm">{booking.id}</div>
+          <Card key={booking.id} className="overflow-hidden border-slate-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+            <CardContent className="p-0">
+              <div className="flex flex-col gap-4 border-l-4 border-l-primary p-5">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="font-semibold text-slate-950">{booking.farmers?.full_name || "Farm booking"}</h3>
+                      {booking.farmers?.farmer_id && <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{booking.farmers.farmer_id}</span>}
+                    </div>
+                    <div className="mt-1 break-all font-mono text-xs text-muted-foreground">Ref {booking.id}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Badge variant={statusVariant(booking.booking_status)} className="capitalize">Status: {prettyStatus(booking.booking_status)}</Badge>
+                    <Badge variant={booking.payment_status === "paid" ? "default" : "outline"} className="capitalize">Payment: {prettyStatus(booking.payment_status)}</Badge>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant={statusVariant(booking.booking_status)}>Status: {booking.booking_status}</Badge>
-                  <Badge variant={booking.payment_status === "paid" ? "default" : "outline"}>Payment: {booking.payment_status}</Badge>
+
+                <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">County</div><div className="mt-1 font-medium text-slate-900">{booking.farmers?.county || "-"}</div></div>
+                  <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">Phone</div><div className="mt-1 font-medium text-slate-900">{booking.farmers?.phone_number || "-"}</div></div>
+                  <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">Variety</div><div className="mt-1 font-medium text-slate-900">{booking.farmers?.potato_variety || "-"}</div></div>
+                  <div className="rounded-lg bg-amber-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-amber-700">Booked Total</div><div className="mt-1 font-semibold text-slate-950">{fmtKES(booking.total_amount ?? booking.acres_booked * booking.price_per_acre)}</div></div>
+                  <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">Acres</div><div className="mt-1 font-medium text-slate-900">{booking.acres_booked}</div></div>
+                  <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">Created</div><div className="mt-1 font-medium text-slate-900">{fmtDate(booking.created_at)}</div></div>
+                  {booking.received_confirmed_at && <div className="rounded-lg bg-emerald-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-emerald-700">Received</div><div className="mt-1 font-medium text-slate-900">{fmtDate(booking.received_confirmed_at)}</div></div>}
+                  {booking.final_price && <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">Final Price</div><div className="mt-1 font-semibold text-slate-950">{fmtKES(booking.final_price)}</div></div>}
+                  {booking.delivery_date && <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">Delivery Date</div><div className="mt-1 font-medium text-slate-900">{fmtDate(booking.delivery_date)}</div></div>}
+                  {booking.buyer_rating && <div className="rounded-lg bg-slate-50 p-3"><div className="text-xs font-medium uppercase tracking-wide text-slate-500">Rating</div><div className="mt-1 flex items-center gap-1 font-medium text-slate-900"><Star className="h-4 w-4 fill-amber-400 text-amber-400" /> {booking.buyer_rating}/5</div></div>}
                 </div>
+                {action && <div className="flex justify-end border-t border-slate-100 pt-4">{action(booking)}</div>}
               </div>
-              <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
-                <div><div className="text-muted-foreground">Farmer</div><div>{booking.farmers?.full_name || "-"}</div></div>
-                <div><div className="text-muted-foreground">County</div><div>{booking.farmers?.county || "-"}</div></div>
-                <div><div className="text-muted-foreground">Phone</div><div>{booking.farmers?.phone_number || "-"}</div></div>
-                <div><div className="text-muted-foreground">Variety</div><div>{booking.farmers?.potato_variety || "-"}</div></div>
-                <div><div className="text-muted-foreground">Acres</div><div>{booking.acres_booked}</div></div>
-                <div><div className="text-muted-foreground">Booked Total</div><div className="font-semibold">{fmtKES(booking.total_amount ?? booking.acres_booked * booking.price_per_acre)}</div></div>
-                <div><div className="text-muted-foreground">Created</div><div>{fmtDate(booking.created_at)}</div></div>
-                {booking.received_confirmed_at && <div><div className="text-muted-foreground">Received</div><div>{fmtDate(booking.received_confirmed_at)}</div></div>}
-                {booking.final_price && <div><div className="text-muted-foreground">Final Price</div><div className="font-semibold">{fmtKES(booking.final_price)}</div></div>}
-                {booking.delivery_date && <div><div className="text-muted-foreground">Delivery Date</div><div>{fmtDate(booking.delivery_date)}</div></div>}
-                {booking.buyer_rating && <div><div className="text-muted-foreground">Rating</div><div className="flex items-center gap-1"><Star className="h-4 w-4 fill-primary text-primary" /> {booking.buyer_rating}/5</div></div>}
-              </div>
-              {action && <div className="mt-4 flex justify-end">{action(booking)}</div>}
             </CardContent>
           </Card>
         ))}
@@ -226,64 +230,88 @@ export default function BuyerDashboard() {
     )
   );
 
-  if (loading) return <div className="container max-w-6xl py-8 text-muted-foreground">Loading buyer dashboard...</div>;
+  if (loading) return (
+    <div className="min-h-screen bg-slate-50">
+      <div className="container max-w-6xl py-8 text-muted-foreground">Loading buyer dashboard...</div>
+    </div>
+  );
 
   return (
-    <div className="container max-w-6xl py-8 space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-bold">Buyer Dashboard</h1>
-          <p className="text-sm text-muted-foreground">{profile?.company_name || profile?.buyer_name || "Buyer"} procurement workspace</p>
-        </div>
-        <div className="flex gap-2">
-          <Button asChild variant="outline"><Link to="/marketplace">Marketplace</Link></Button>
-          <Button variant="outline" onClick={loadDashboard}><RefreshCw className="mr-2 h-4 w-4" /> Refresh</Button>
-        </div>
-      </div>
-
-      <div className="grid gap-4 md:grid-cols-4">
-        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Active</p><p className="text-2xl font-bold">{activeBookings.length}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Pending</p><p className="text-2xl font-bold">{pendingBookings.length}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Historical</p><p className="text-2xl font-bold">{historicalBookings.length}</p></CardContent></Card>
-        <Card><CardContent className="p-5"><p className="text-sm text-muted-foreground">Open Complaints</p><p className="text-2xl font-bold">{openComplaints}</p></CardContent></Card>
-      </div>
-
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-lg"><Edit3 className="h-5 w-5" /> Profile</CardTitle>
-          <Button onClick={saveProfile} disabled={profileSaving}>{profileSaving ? "Saving..." : "Save Profile"}</Button>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-3">
-          <div className="space-y-2"><Label>Company Name</Label><Input value={profile?.company_name || ""} onChange={(e) => updateProfile("company_name", e.target.value)} /></div>
-          <div className="space-y-2">
-            <Label>Business Type</Label>
-            <Select value={profile?.business_type || ""} onValueChange={(value) => updateProfile("business_type", value)}>
-              <SelectTrigger><SelectValue placeholder="Select business type" /></SelectTrigger>
-              <SelectContent>{BUSINESS_TYPES.map((type) => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
-            </Select>
+    <div className="min-h-screen bg-slate-50">
+      <div className="container max-w-7xl py-6 md:py-8">
+        <section className="overflow-hidden rounded-xl border border-emerald-900/10 bg-white shadow-sm">
+          <div className="border-b border-slate-100 bg-gradient-to-r from-emerald-950 via-emerald-900 to-slate-900 px-5 py-6 text-white md:px-7">
+            <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0">
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-medium text-emerald-50">
+                  <Leaf className="h-3.5 w-3.5 text-amber-300" />
+                  Buyer procurement workspace
+                </div>
+                <h1 className="text-2xl font-bold tracking-normal text-white md:text-3xl">Hi, {displayName}</h1>
+                <p className="mt-2 max-w-2xl text-sm text-emerald-50/85">
+                  Manage farm bookings, supplier receipts, and procurement support for {companyName}.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button asChild variant="secondary" className="bg-white text-emerald-950 hover:bg-emerald-50">
+                  <Link to="/buyer/settings" aria-label="Open buyer profile"><User className="mr-2 h-4 w-4" /> Profile</Link>
+                </Button>
+                <Button asChild className="bg-amber-400 text-slate-950 hover:bg-amber-300">
+                  <Link to="/marketplace"><ShoppingCart className="mr-2 h-4 w-4" /> Marketplace</Link>
+                </Button>
+                <Button variant="outline" className="border-white/30 bg-white/10 text-white hover:bg-white/20 hover:text-white" onClick={loadDashboard}>
+                  <RefreshCw className="mr-2 h-4 w-4" /> Refresh
+                </Button>
+              </div>
+            </div>
           </div>
-          <div className="space-y-2"><Label>Email</Label><Input value={profile?.email || ""} readOnly disabled /></div>
-          <div className="space-y-2"><Label>Contact Name</Label><Input value={profile?.contact_full_name || profile?.buyer_name || ""} onChange={(e) => updateProfile("contact_full_name", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Contact Role</Label><Input value={profile?.contact_role || ""} onChange={(e) => updateProfile("contact_role", e.target.value)} /></div>
-          <div className="space-y-2"><Label>Phone</Label><Input value={profile?.phone_number || ""} onChange={(e) => updateProfile("phone_number", e.target.value)} /></div>
-          <div className="space-y-2">
-            <Label>Primary County</Label>
-            <Select value={profile?.primary_county || profile?.county || ""} onValueChange={(value) => updateProfile("primary_county", value)}>
-              <SelectTrigger><SelectValue placeholder="Select county" /></SelectTrigger>
-              <SelectContent>{Object.keys(KENYA_COUNTIES).map((county) => <SelectItem key={county} value={county}>{county}</SelectItem>)}</SelectContent>
-            </Select>
+          <div className="grid gap-4 px-5 py-4 text-sm md:grid-cols-3 md:px-7">
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Business type</p>
+              <p className="mt-1 font-medium text-slate-950">{profile?.business_type || "Buyer account"}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Primary location</p>
+              <p className="mt-1 font-medium text-slate-950">{locationLabel}</p>
+            </div>
+            <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Contact</p>
+              <p className="mt-1 font-medium text-slate-950">{profile?.email || profile?.phone_number || "Profile details pending"}</p>
+            </div>
           </div>
-          <div className="space-y-2"><Label>Town / Area</Label><Input value={profile?.primary_town || ""} onChange={(e) => updateProfile("primary_town", e.target.value)} /></div>
-          <div className="space-y-2 md:col-span-3"><Label>Notes</Label><Textarea rows={3} value={profile?.additional_notes || ""} onChange={(e) => updateProfile("additional_notes", e.target.value)} /></div>
-        </CardContent>
-      </Card>
+        </section>
 
-      <Tabs defaultValue="active">
-        <TabsList className="flex w-full flex-wrap justify-start h-auto">
-          <TabsTrigger value="active">Active ({activeBookings.length})</TabsTrigger>
-          <TabsTrigger value="pending">Pending ({pendingBookings.length})</TabsTrigger>
-          <TabsTrigger value="history">History ({historicalBookings.length})</TabsTrigger>
-          <TabsTrigger value="complaints">Complaints ({complaints.length})</TabsTrigger>
+        <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+          {[
+            { label: "Active bookings", value: activeBookings.length, icon: PackageCheck, tone: "text-emerald-700", bg: "bg-emerald-50", strip: "bg-emerald-600" },
+            { label: "Pending bookings", value: pendingBookings.length, icon: Clock3, tone: "text-amber-700", bg: "bg-amber-50", strip: "bg-amber-500" },
+            { label: "Historical bookings", value: historicalBookings.length, icon: History, tone: "text-slate-700", bg: "bg-slate-100", strip: "bg-slate-500" },
+            { label: "Open complaints", value: openComplaints, icon: AlertCircle, tone: "text-red-700", bg: "bg-red-50", strip: "bg-red-500" },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <Card key={item.label} className="relative overflow-hidden border-slate-200 bg-white shadow-sm">
+                <div className={`absolute inset-x-0 top-0 h-1 ${item.strip}`} />
+                <CardContent className="flex min-h-[128px] items-center justify-between gap-4 p-5">
+                  <div>
+                    <p className="text-sm font-medium text-slate-500">{item.label}</p>
+                    <p className="mt-3 text-3xl font-bold text-slate-950">{item.value}</p>
+                  </div>
+                  <div className={`rounded-xl ${item.bg} p-3 ${item.tone}`}>
+                    <Icon className="h-6 w-6" />
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+
+        <Tabs defaultValue="active" className="mt-6">
+        <TabsList className="flex h-auto w-full flex-wrap justify-start gap-2 rounded-xl border border-slate-200 bg-white p-2 shadow-sm">
+          <TabsTrigger value="active" className="gap-2 rounded-lg data-[state=active]:bg-emerald-900 data-[state=active]:text-white"><PackageCheck className="h-4 w-4" /> Active ({activeBookings.length})</TabsTrigger>
+          <TabsTrigger value="pending" className="gap-2 rounded-lg data-[state=active]:bg-emerald-900 data-[state=active]:text-white"><FileClock className="h-4 w-4" /> Pending ({pendingBookings.length})</TabsTrigger>
+          <TabsTrigger value="history" className="gap-2 rounded-lg data-[state=active]:bg-emerald-900 data-[state=active]:text-white"><History className="h-4 w-4" /> History ({historicalBookings.length})</TabsTrigger>
+          <TabsTrigger value="complaints" className="gap-2 rounded-lg data-[state=active]:bg-emerald-900 data-[state=active]:text-white"><AlertCircle className="h-4 w-4" /> Complaints ({complaints.length})</TabsTrigger>
         </TabsList>
         <TabsContent value="active" className="mt-4">
           <BookingCards rows={activeBookings} action={(booking) => (
@@ -294,8 +322,11 @@ export default function BuyerDashboard() {
         <TabsContent value="history" className="mt-4"><BookingCards rows={historicalBookings} /></TabsContent>
         <TabsContent value="complaints" className="mt-4">
           <div className="grid gap-4 lg:grid-cols-[420px_1fr]">
-            <Card>
-              <CardHeader><CardTitle className="flex items-center gap-2 text-lg"><AlertCircle className="h-5 w-5" /> Lodge Complaint</CardTitle></CardHeader>
+            <Card className="border-slate-200 bg-white shadow-sm">
+              <CardHeader className="border-b border-slate-100">
+                <CardTitle className="flex items-center gap-2 text-lg text-slate-950"><AlertCircle className="h-5 w-5 text-amber-600" /> Procurement Support</CardTitle>
+                <p className="text-sm text-muted-foreground">Log a delivery, quality, or payment issue for follow-up.</p>
+              </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Related Booking</Label>
@@ -314,16 +345,32 @@ export default function BuyerDashboard() {
             </Card>
             <div className="space-y-3">
               {complaints.length === 0 ? (
-                <Card><CardContent className="py-10 text-center text-muted-foreground">No complaints submitted.</CardContent></Card>
+                <Card className="border-dashed bg-white/80 shadow-sm">
+                  <CardContent className="flex min-h-[220px] flex-col items-center justify-center gap-3 py-10 text-center">
+                    <div className="rounded-full bg-emerald-50 p-3 text-primary"><CheckCircle2 className="h-6 w-6" /></div>
+                    <div>
+                      <p className="font-semibold text-slate-900">No complaints submitted</p>
+                      <p className="mt-1 text-sm text-muted-foreground">Support cases you raise will be tracked here.</p>
+                    </div>
+                  </CardContent>
+                </Card>
               ) : complaints.map((complaint) => (
-                <Card key={complaint.id}>
+                <Card key={complaint.id} className="border-slate-200 bg-white shadow-sm">
                   <CardContent className="p-5">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div><h3 className="font-semibold">{complaint.subject}</h3><p className="text-xs text-muted-foreground">{fmtDate(complaint.created_at)}</p></div>
-                      <Badge variant={statusVariant(complaint.status)}>{complaint.status.replace("_", " ")}</Badge>
+                      <div>
+                        <h3 className="font-semibold text-slate-950">{complaint.subject}</h3>
+                        <p className="text-xs text-muted-foreground">{fmtDate(complaint.created_at)}</p>
+                      </div>
+                      <Badge variant={statusVariant(complaint.status)} className="capitalize">{prettyStatus(complaint.status)}</Badge>
                     </div>
                     <p className="mt-3 text-sm text-muted-foreground whitespace-pre-wrap">{complaint.content}</p>
-                    {complaint.booking_id && <p className="mt-3 text-xs text-muted-foreground">Booking: {complaint.booking_id}</p>}
+                    {complaint.booking_id && (
+                      <p className="mt-4 inline-flex max-w-full items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs text-slate-600">
+                        <ArrowUpRight className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">Booking: {complaint.booking_id}</span>
+                      </p>
+                    )}
                   </CardContent>
                 </Card>
               ))}
@@ -344,6 +391,7 @@ export default function BuyerDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }
