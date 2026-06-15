@@ -57,7 +57,7 @@ Deno.serve(async (req) => {
 
     const { data: booking, error: lookupErr } = await supabase
       .from("bookings")
-      .select("id, payment_status, acres_booked, total_amount, farmer_id, buyer_id, buyers(buyer_name,email,phone_number,county), farmers(full_name,email)")
+      .select("id, payment_status, booking_status, acres_booked, total_amount, farmer_id, buyer_id, buyers(buyer_name,email,phone_number,county), farmers(full_name,email)")
       .eq("payment_reference", reference)
       .maybeSingle();
 
@@ -71,6 +71,14 @@ Deno.serve(async (req) => {
 
     if (booking.payment_status === "paid") {
       return new Response(JSON.stringify({ received: true }), {
+        status: 200,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    if (booking.payment_status === "rejected" || booking.booking_status === "rejected") {
+      console.warn("Ignoring successful payment webhook for expired booking", { booking_id: booking.id, reference });
+      return new Response(JSON.stringify({ received: true, ignored: "booking_expired" }), {
         status: 200,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });

@@ -73,7 +73,17 @@ Deno.serve(async (req) => {
       return json(404, { status: 404, message: "No farmers match the provided filters" });
     }
 
-    const enriched = data.map((f) => ({ ...f, price_per_acre: 5000 }));
+    const enriched = data.map((f) => {
+      const farm_acreage = Number(f.acreage_planted);
+      const price_per_acre = 5000;
+
+      return {
+        ...f,
+        farm_acreage,
+        price_per_acre,
+        estimated_total_amount: Number.isFinite(farm_acreage) ? farm_acreage * price_per_acre : null,
+      };
+    });
 
     return json(200, { status: 200, data: enriched });
   } catch (err) {

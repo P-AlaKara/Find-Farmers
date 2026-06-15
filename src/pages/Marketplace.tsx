@@ -98,7 +98,7 @@ const Marketplace = () => {
       setPaymentOverlay({ reference, bookingRef: booking_ref, message, paid: false, timeout: false });
 
       let attempts = 0;
-      const maxAttempts = 75;
+      const maxAttempts = 35;
       const intervalId = window.setInterval(async () => {
         attempts += 1;
         const { data: statusData, error: statusError } = await supabase.functions.invoke(`booking-status?reference=${reference}`, { method: "GET" });
@@ -107,6 +107,11 @@ const Marketplace = () => {
           setPaymentOverlay((prev) => prev ? { ...prev, paid: true } : prev);
           setSuccessBanner("Booking confirmed! The farm has been reserved for you.");
           toast.success("Booking confirmed!");
+          queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
+        } else if (!statusError && statusData?.data?.payment_status === "rejected") {
+          window.clearInterval(intervalId);
+          setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
+          toast.error("Payment timed out. The farm has been released.");
           queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
         } else if (attempts >= maxAttempts) {
           window.clearInterval(intervalId);

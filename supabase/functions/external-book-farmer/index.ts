@@ -1,5 +1,7 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
+const PRICE_PER_ACRE = 5000;
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-api-key",
@@ -13,17 +15,56 @@ const json = (status: number, body: unknown) =>
   });
 
 const isValidUrl = (s: string) => {
-  try { new URL(s); return true; } catch { return false; }
+  try {
+    new URL(s);
+    return true;
+  } catch {
+    return false;
+  }
 };
+
 const formatMpesaPhone = (phone: string) => {
-  const cleaned = phone.replace(/[\s\-()]/g, "");
-  if (cleaned.startsWith("+254")) return cleaned.slice(1);
-  if (cleaned.startsWith("0")) return `254${cleaned.slice(1)}`;
-  return cleaned;
+  const digits = String(phone || "").replace(/\D/g, "");
+  let local = "";
+
+  if (digits.startsWith("254")) local = digits.slice(3);
+  else if (digits.startsWith("0")) local = digits.slice(1);
+  else if (digits.length === 9) local = digits;
+
+  if (!/^(7|1)\d{8}$/.test(local)) return null;
+  return `+254${local}`;
+};
+
+const rollbackReservation = async (
+  supabase: ReturnType<typeof createClient>,
+  bookingId: string | null,
+  farmerId: string | null,
+) => {
+  if (bookingId) {
+    const { error } = await supabase.from("bookings").delete().eq("id", bookingId);
+    if (error) console.error("External booking rollback delete failed:", error);
+  }
+
+  if (farmerId) {
+    const { error } = await supabase
+      .from("farmers")
+      .update({ listing_status: "available" })
+      .eq("id", farmerId)
+      .eq("listing_status", "booked");
+    if (error) console.error("External booking rollback farmer release failed:", error);
+  }
 };
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
+
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+
+  let bookingId: string | null = null;
+  let lockedFarmerId: string | null = null;
 
   try {
     if (req.method !== "POST") return json(405, { status: 405, message: "Method not allowed" });
@@ -34,37 +75,44 @@ Deno.serve(async (req) => {
       return json(401, { status: 401, message: "Unauthorized" });
     }
 
-    let body: any;
-    try { body = await req.json(); } catch { return json(400, { status: 400, message: "Invalid JSON body" }); }
+    const body = await req.json().catch(() => null);
+    if (!body) return json(400, { status: 400, message: "Invalid JSON body" });
 
-    const { farmer_id, name, phone, email, county, acres, callback_url } = body ?? {};
+    const farmer_id = String(body.farmer_id || "").trim();
+    const company_name = String(body.company_name || "").trim();
+    const phone = String(body.phone || "").trim();
+    const email = String(body.email || "").trim().toLowerCase();
+    const county = String(body.county || "").trim();
+    const callback_url = String(body.callback_url || "").trim();
+
     const missing: string[] = [];
     if (!farmer_id) missing.push("farmer_id");
-    if (!name) missing.push("name");
+    if (!company_name) missing.push("company_name");
     if (!phone) missing.push("phone");
     if (!email) missing.push("email");
     if (!county) missing.push("county");
-    if (acres === undefined || acres === null) missing.push("acres");
     if (!callback_url) missing.push("callback_url");
     if (missing.length) return json(400, { status: 400, message: `Missing required fields: ${missing.join(", ")}` });
 
-    if (typeof acres !== "number" || acres <= 0) {
-      return json(400, { status: 400, message: "acres must be a positive number" });
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return json(400, { status: 400, message: "email must be a valid email address" });
     }
-    if (typeof callback_url !== "string" || !isValidUrl(callback_url)) {
+    if (!isValidUrl(callback_url)) {
       return json(400, { status: 400, message: "callback_url must be a valid URL" });
     }
 
-    const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
-    );
+    const formattedPhone = formatMpesaPhone(phone);
+    if (!formattedPhone) {
+      return json(400, {
+        status: 400,
+        message: "phone must be a valid Kenyan M-Pesa number, for example 07XXXXXXXX or +2547XXXXXXXX",
+      });
+    }
 
-    // 1. Lookup farmer
     const { data: farmer, error: farmerErr } = await supabase
       .from("farmers")
-      .select("id, acreage_planted, registration_status, listing_status")
-      .eq("id", farmer_id)
+      .select("id, farmer_id, acreage_planted, registration_status, listing_status")
+      .eq("farmer_id", farmer_id)
       .maybeSingle();
 
     if (farmerErr) {
@@ -75,27 +123,67 @@ Deno.serve(async (req) => {
     if (farmer.registration_status !== "approved" || farmer.listing_status !== "available") {
       return json(400, { status: 400, message: "Farmer is not available for booking" });
     }
-    if (Number(farmer.acreage_planted) < Number(acres)) {
-      return json(400, { status: 400, message: "Requested acres exceed farmer's planted acreage" });
+
+    const farmAcreage = Number(farmer.acreage_planted);
+    if (!Number.isFinite(farmAcreage) || farmAcreage <= 0) {
+      return json(400, { status: 400, message: "Farmer listing has invalid acreage" });
     }
 
-    // 2. Find or create buyer
     let buyerId: string | null = null;
-    const { data: existingBuyers, error: buyerLookupErr } = await supabase
+    const { data: buyerByEmail, error: buyerByEmailErr } = await supabase
       .from("buyers")
       .select("id")
-      .or(`email.eq.${email},phone_number.eq.${phone}`)
+      .eq("email", email)
       .limit(1);
-    if (buyerLookupErr) {
-      console.error("Buyer lookup error:", buyerLookupErr);
+    if (buyerByEmailErr) {
+      console.error("Buyer email lookup error:", buyerByEmailErr);
       return json(500, { status: 500, message: "Internal server error" });
     }
-    if (existingBuyers && existingBuyers.length > 0) {
-      buyerId = existingBuyers[0].id;
+
+    if (buyerByEmail && buyerByEmail.length > 0) {
+      buyerId = buyerByEmail[0].id;
+    } else {
+      const { data: buyerByPhone, error: buyerByPhoneErr } = await supabase
+        .from("buyers")
+        .select("id")
+        .eq("phone_number", phone)
+        .limit(1);
+      if (buyerByPhoneErr) {
+        console.error("Buyer phone lookup error:", buyerByPhoneErr);
+        return json(500, { status: 500, message: "Internal server error" });
+      }
+      buyerId = buyerByPhone && buyerByPhone.length > 0 ? buyerByPhone[0].id : null;
+    }
+
+    if (buyerId) {
+      const { error: updateBuyerErr } = await supabase
+        .from("buyers")
+        .update({
+          buyer_name: company_name,
+          company_name,
+          phone_number: phone,
+          email,
+          county,
+          primary_county: county,
+        })
+        .eq("id", buyerId);
+      if (updateBuyerErr) {
+        console.error("Buyer update error:", updateBuyerErr);
+        return json(500, { status: 500, message: "Failed to update buyer" });
+      }
     } else {
       const { data: newBuyer, error: createBuyerErr } = await supabase
         .from("buyers")
-        .insert({ buyer_name: name, phone_number: phone, email, county })
+        .insert({
+          buyer_name: company_name,
+          company_name,
+          phone_number: phone,
+          email,
+          county,
+          primary_county: county,
+          account_status: "active",
+          profile_completed: false,
+        })
         .select("id")
         .single();
       if (createBuyerErr || !newBuyer) {
@@ -105,16 +193,13 @@ Deno.serve(async (req) => {
       buyerId = newBuyer.id;
     }
 
-    // 3-4. Create booking
-    const total_amount = Number(acres) * 5000;
     const { data: booking, error: bookingErr } = await supabase
       .from("bookings")
       .insert({
         buyer_id: buyerId,
         farmer_id: farmer.id,
-        acres_booked: acres,
-        price_per_acre: 5000,
-        total_amount,
+        acres_booked: farmAcreage,
+        price_per_acre: PRICE_PER_ACRE,
         payment_status: "pending",
         booking_status: "pending_approval",
         callback_url,
@@ -125,75 +210,95 @@ Deno.serve(async (req) => {
       console.error("Booking create error:", bookingErr);
       return json(500, { status: 500, message: "Failed to create booking" });
     }
+    bookingId = booking.id;
 
-    // 5. Mark farmer as booked
-    const { error: updateFarmerErr } = await supabase
+    const { data: lockedFarmer, error: updateFarmerErr } = await supabase
       .from("farmers")
       .update({ listing_status: "booked" })
-      .eq("id", farmer.id);
+      .eq("id", farmer.id)
+      .eq("listing_status", "available")
+      .select("id")
+      .maybeSingle();
     if (updateFarmerErr) {
       console.error("Farmer status update error:", updateFarmerErr);
-      await supabase.from("bookings").delete().eq("id", booking.id);
+      await rollbackReservation(supabase, bookingId, null);
       return json(500, { status: 500, message: "Failed to reserve farmer listing" });
     }
+    if (!lockedFarmer) {
+      await rollbackReservation(supabase, bookingId, null);
+      return json(409, { status: 409, message: "Farmer is no longer available for booking" });
+    }
+    lockedFarmerId = farmer.id;
 
-    // 6. Charge via Paystack M-Pesa
     const paystackKey = Deno.env.get("PAYSTACK_SECRET_KEY");
     if (!paystackKey) {
-      await supabase.from("bookings").delete().eq("id", booking.id);
-      await supabase.from("farmers").update({ listing_status: "available" }).eq("id", farmer.id);
+      await rollbackReservation(supabase, bookingId, lockedFarmerId);
       return json(500, { status: 500, message: "Payment provider not configured" });
     }
 
-    try {
-      const reference = booking.id.replace(/-/g, "");
-      const formattedPhone = formatMpesaPhone(phone);
-      const { error: refErr } = await supabase
-        .from("bookings")
-        .update({ payment_reference: reference })
-        .eq("id", booking.id);
-      if (refErr) throw new Error("Failed to store payment reference");
-
-      const paystackRes = await fetch("https://api.paystack.co/charge", {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${paystackKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          amount: Math.round(total_amount * 100),
-          email,
-          currency: "KES",
-          mobile_money: {
-            phone: formattedPhone,
-            provider: "mpesa",
-          },
-          reference,
-          metadata: { booking_id: booking.id, farmer_id: farmer.id },
-        }),
-      });
-      const paystackJson = await paystackRes.json();
-      if (!paystackRes.ok || !paystackJson?.status) {
-        throw new Error(paystackJson?.message || "Paystack charge failed");
-      }
-
-      return json(200, {
-        status: 200,
-        data: {
-          booking_ref: booking.id,
-          reference,
-          message: `An M-Pesa payment prompt has been sent to ${formattedPhone}. The customer should enter their PIN to complete payment.`,
-          payment_method: "mpesa",
-        },
-      });
-    } catch (payErr) {
-      console.error("Paystack error:", payErr);
-      await supabase.from("bookings").delete().eq("id", booking.id);
-      await supabase.from("farmers").update({ listing_status: "available" }).eq("id", farmer.id);
-      return json(500, { status: 500, message: (payErr as Error).message || "Payment initialization failed" });
+    const paymentReference = booking.id.replace(/-/g, "");
+    const totalAmount = farmAcreage * PRICE_PER_ACRE;
+    const { error: refErr } = await supabase
+      .from("bookings")
+      .update({ payment_reference: paymentReference })
+      .eq("id", booking.id);
+    if (refErr) {
+      console.error("Payment reference update error:", refErr);
+      await rollbackReservation(supabase, bookingId, lockedFarmerId);
+      return json(500, { status: 500, message: "Failed to store payment reference" });
     }
+
+    const paystackRes = await fetch("https://api.paystack.co/charge", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${paystackKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        amount: Math.round(totalAmount * 100),
+        email,
+        currency: "KES",
+        mobile_money: {
+          phone: formattedPhone,
+          provider: "mpesa",
+        },
+        reference: paymentReference,
+        metadata: {
+          booking_id: booking.id,
+          farmer_id: farmer.id,
+          public_farmer_id: farmer.farmer_id,
+          buyer_id: buyerId,
+          company_name,
+          buyer_county: county,
+        },
+      }),
+    });
+
+    const paystackJson = await paystackRes.json().catch(() => ({}));
+    if (!paystackRes.ok || !paystackJson?.status) {
+      console.error("Paystack charge error:", paystackJson);
+      await rollbackReservation(supabase, bookingId, lockedFarmerId);
+      return json(500, {
+        status: 500,
+        message: paystackJson?.message || "Payment initialization failed",
+      });
+    }
+
+    return json(200, {
+      status: 200,
+      data: {
+        booking_ref: booking.id,
+        payment_reference: paymentReference,
+        reference: paymentReference,
+        total_amount: totalAmount,
+        farm_acreage: farmAcreage,
+        payment_method: "mpesa",
+        message: `An M-Pesa payment prompt has been sent to ${formattedPhone}. The customer should enter their PIN to complete payment.`,
+      },
+    });
   } catch (err) {
-    console.error("Unexpected error:", err);
+    console.error("Unexpected external booking error:", err);
+    await rollbackReservation(supabase, bookingId, lockedFarmerId);
     return json(500, { status: 500, message: "Internal server error" });
   }
 });
