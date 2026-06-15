@@ -17,6 +17,9 @@ verify_jwt = false
 [functions.external-booking-webhook]
 verify_jwt = false
 
+[functions.expire-pending-bookings]
+verify_jwt = false
+
 [functions.initialize-payment]
 verify_jwt = false
 
