@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { validateExternalBookingRequest } from "./validation.ts";
 
 const PRICE_PER_ACRE = 5000;
 
@@ -78,21 +79,9 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => null);
     if (!body) return json(400, { status: 400, message: "Invalid JSON body" });
 
-    const farmer_id = String(body.farmer_id || "").trim();
-    const company_name = String(body.company_name || "").trim();
-    const phone = String(body.phone || "").trim();
-    const email = String(body.email || "").trim().toLowerCase();
-    const county = String(body.county || "").trim();
-    const callback_url = String(body.callback_url || "").trim();
-
-    const missing: string[] = [];
-    if (!farmer_id) missing.push("farmer_id");
-    if (!company_name) missing.push("company_name");
-    if (!phone) missing.push("phone");
-    if (!email) missing.push("email");
-    if (!county) missing.push("county");
-    if (!callback_url) missing.push("callback_url");
-    if (missing.length) return json(400, { status: 400, message: `Missing required fields: ${missing.join(", ")}` });
+    const validated = validateExternalBookingRequest(body);
+    if (!validated.ok) return json(400, { status: 400, message: validated.message });
+    const { farmer_id, company_name, phone, email, county, callback_url } = validated.data;
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return json(400, { status: 400, message: "email must be a valid email address" });

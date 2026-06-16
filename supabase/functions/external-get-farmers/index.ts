@@ -1,4 +1,5 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { applyHarvestDateFilters } from "./harvest.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -50,8 +51,8 @@ Deno.serve(async (req) => {
     const potato_variety = qp.get("potato_variety");
     const min_acreage = qp.get("min_acreage");
     const max_acreage = qp.get("max_acreage");
-    const planting_date_from = qp.get("planting_date_from");
-    const planting_date_to = qp.get("planting_date_to");
+    const harvest_date_from = qp.get("harvest_date_from");
+    const harvest_date_to = qp.get("harvest_date_to");
 
     if (county) query = query.ilike("county", county);
     if (ward) query = query.ilike("ward", ward);
@@ -59,9 +60,6 @@ Deno.serve(async (req) => {
     if (potato_variety) query = query.ilike("potato_variety", potato_variety);
     if (min_acreage) query = query.gte("acreage_planted", Number(min_acreage));
     if (max_acreage) query = query.lte("acreage_planted", Number(max_acreage));
-    if (planting_date_from) query = query.gte("planting_date", planting_date_from);
-    if (planting_date_to) query = query.lte("planting_date", planting_date_to);
-
     const { data, error } = await query;
 
     if (error) {
@@ -73,7 +71,13 @@ Deno.serve(async (req) => {
       return json(404, { status: 404, message: "No farmers match the provided filters" });
     }
 
-    const enriched = data.map((f) => {
+    const filtered = applyHarvestDateFilters(data, { harvest_date_from, harvest_date_to });
+
+    if (filtered.length === 0) {
+      return json(404, { status: 404, message: "No farmers match the provided filters" });
+    }
+
+    const enriched = filtered.map((f) => {
       const farm_acreage = Number(f.acreage_planted);
       const price_per_acre = 5000;
 
