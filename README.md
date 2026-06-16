@@ -101,10 +101,10 @@ Supported query filters:
 - `potato_variety`
 - `min_acreage`
 - `max_acreage`
-- `planting_date_from`
-- `planting_date_to`
+- `harvest_date_from`
+- `harvest_date_to`
 
-Only approved farmers with `listing_status = available` are returned. Use the public `farmer_id` from this response when booking; internal database UUIDs are not part of the external contract.
+Only approved farmers with `listing_status = available` are returned. Harvest-date filters are matched against the derived `estimated_harvest_date`, calculated from `planting_date` and the potato variety's expected growing period. Use the public `farmer_id` from this response when booking; internal database UUIDs are not part of the external contract.
 
 Example response:
 
@@ -124,6 +124,7 @@ Example response:
       "acreage_planted": 3,
       "farm_acreage": 3,
       "planting_date": "2026-05-01",
+      "estimated_harvest_date": "2026-07-30",
       "listing_status": "available",
       "price_per_acre": 5000,
       "estimated_total_amount": 15000
@@ -153,6 +154,8 @@ Request body:
 ```
 
 Do not send acres. External bookings always reserve the whole farm using the farmer's `acreage_planted`.
+
+Troubleshooting: the current `external-book-farmer` contract does not accept or require `name` or `acres`. If a client receives `Missing required fields: name, acres`, verify the request is going to `/functions/v1/external-book-farmer`, confirm the deployed function version matches this repository, and check whether the procurement app is remapping the request before sending it.
 
 Immediate response:
 
