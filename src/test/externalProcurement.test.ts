@@ -62,7 +62,7 @@ describe("external procurement booking validation", () => {
     const result = validateExternalBookingRequest({});
 
     expect(result.ok).toBe(false);
-    if (!result.ok) {
+    if (result.ok === false) {
       expect(result.message).not.toContain("name, acres");
       expect(result.message).not.toContain("acres");
     }

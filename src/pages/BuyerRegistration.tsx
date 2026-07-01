@@ -454,6 +454,12 @@ export default function BuyerRegistration() {
 
             {step === 5 && (
               <>
+                <div className="rounded-lg border bg-muted/30 p-4 space-y-1">
+                  <p className="text-sm font-medium">Company Contact Person</p>
+                  <p className="text-xs text-muted-foreground">
+                    These details are for the primary person we will reach out to on behalf of <span className="font-medium text-foreground">{form.company_name || "your company"}</span>.
+                  </p>
+                </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Full Name *</Label>
