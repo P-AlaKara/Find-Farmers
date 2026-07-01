@@ -58,7 +58,7 @@ describe("external procurement booking validation", () => {
     expect(result).toEqual({ ok: false, message: "Missing required fields: company_name" });
   });
 
-  it("does not require name or acres", you", () => {
+  it("does not require name or acres", () => {
     const result = validateExternalBookingRequest({});
 
     expect(result.ok).toBe(false);
