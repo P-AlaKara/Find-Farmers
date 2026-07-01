@@ -2,6 +2,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { sendEmail } from "../_shared/resend.js";
+import { postMainPlatformCallback } from "../_shared/main-platform.ts";
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
@@ -57,7 +58,7 @@ Deno.serve(async (req) => {
 
     const { data: booking, error: lookupErr } = await supabase
       .from("bookings")
-      .select("id, payment_status, booking_status, acres_booked, total_amount, farmer_id, buyer_id, buyers(buyer_name,email,phone_number,county), farmers(full_name,email)")
+      .select("id, payment_reference, payment_status, booking_status, acres_booked, total_amount, farmer_id, buyer_id, buyers(buyer_name,company_name,email,phone_number,county), farmers(farmer_id,full_name,email,external_callback_url)")
       .eq("payment_reference", reference)
       .maybeSingle();
 
@@ -134,6 +135,25 @@ Deno.serve(async (req) => {
       </div>`;
     try { if (booking.buyers?.email) await sendEmail(booking.buyers.email, "Booking Confirmed — PotatoMarket Kenya", buyerHtml); } catch (err) { console.error(err); }
     try { if (booking.farmers?.email) await sendEmail(booking.farmers.email, "New Booking — PotatoMarket Kenya", farmerHtml); } catch (err) { console.error(err); }
+
+    await postMainPlatformCallback(booking.farmers?.external_callback_url, {
+      event: "booking_confirmed",
+      data: {
+        booking_ref: booking.id,
+        farmer_id: booking.farmers?.farmer_id ?? null,
+        payment_reference: booking.payment_reference,
+        payment_status: "paid",
+        booking_status: "confirmed",
+        total_amount: booking.total_amount,
+        farm_acreage: booking.acres_booked,
+        buyer: {
+          company_name: booking.buyers?.company_name ?? booking.buyers?.buyer_name ?? null,
+          phone: booking.buyers?.phone_number ?? null,
+          email: booking.buyers?.email ?? null,
+          county: booking.buyers?.county ?? null,
+        },
+      },
+    });
 
     return new Response(JSON.stringify({ received: true }), {
       status: 200,

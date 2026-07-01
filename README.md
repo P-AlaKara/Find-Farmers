@@ -77,6 +77,8 @@ To enable it:
 
 External procurement apps can search available farms, start a whole-farm booking, and receive the final result by callback. The external app does not run M-Pesa prompting or payment retries; this platform initializes the prompt, processes Paystack webhooks, confirms successful bookings, and rolls back timed-out bookings.
 
+For the same-organization main platform integration, use the separate API documented in [`docs/main-platform-api.md`](docs/main-platform-api.md). That integration uses `EXTERNAL_API_KEY_MAIN` and follows the farmer-first flow where payment happens only after farmer confirmation.
+
 ### Authentication
 
 All external endpoints require an API key header:
@@ -84,6 +86,8 @@ All external endpoints require an API key header:
 ```http
 x-api-key: <EXTERNAL_API_KEY>
 ```
+
+`EXTERNAL_API_KEY` is reserved for the existing procurement app integration. Do not reuse it for the main platform; set `EXTERNAL_API_KEY_MAIN` for the root-domain main platform API.
 
 Paystack calls `external-booking-webhook` directly with `x-paystack-signature`. Pending payments are expired by the scheduled `expire-pending-bookings` function; see `CRON.md`.
 

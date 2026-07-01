@@ -20,8 +20,29 @@ verify_jwt = false
 [functions.expire-pending-bookings]
 verify_jwt = false
 
+[functions.booking-status]
+verify_jwt = false
+
+[functions.request-booking]
+verify_jwt = false
+
 [functions.initialize-payment]
 verify_jwt = false
 
 [functions.payment-webhook]
+verify_jwt = false
+
+[functions.main-platform-register-farmer]
+verify_jwt = false
+
+[functions.main-platform-get-farmer]
+verify_jwt = false
+
+[functions.main-platform-farmer-bookings]
+verify_jwt = false
+
+[functions.main-platform-confirm-booking]
+verify_jwt = false
+
+[functions.main-platform-booking-status]
 verify_jwt = false

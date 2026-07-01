@@ -7,8 +7,9 @@ This project uses a scheduled Supabase Edge Function to expire unpaid bookings.
 `expire-pending-bookings` should run every minute. It finds bookings where:
 
 - `payment_status = pending`
-- `booking_status = pending_approval`
-- `created_at` is older than 2 minutes
+- `payment_reference IS NOT NULL`
+- `payment_requested_at` is older than 2 minutes
+- `booking_status = approved`, or `booking_status = pending_approval` for the legacy procurement integration
 
 For each expired booking, it:
 
@@ -17,7 +18,7 @@ For each expired booking, it:
 - releases the farmer back to `listing_status = available`
 - sends a failure callback for external bookings that have `callback_url`
 
-The normal app still polls `booking-status`, which also has the same 2-minute expiry behavior as a fallback. The cron job is the primary cleanup path.
+The normal app still polls `booking-status`, which also has the same 2-minute expiry behavior as a fallback. Farmer-waiting local/main-platform bookings with `booking_status = pending_approval` do not expire until the buyer starts payment after farmer approval. The cron job is the primary cleanup path.
 
 ## Required Secrets
 
@@ -99,7 +100,7 @@ Expected response:
 
 ## Operational Notes
 
-- Run every minute so a 2-minute timeout is enforced promptly.
+- Run every minute so a 2-minute timeout is enforced promptly after a payment prompt is started.
 - If a Paystack success webhook arrives after a booking has expired, the webhook ignores it and does not re-confirm the booking.
 - If a callback URL is down, the booking is still expired and the farmer is still released; the failed callback is logged in `callback_failures`.
 - To remove the schedule:

@@ -1,4 +1,5 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2";
+import { postMainPlatformCallback } from "../_shared/main-platform.ts";
 
 const PAYMENT_TIMEOUT_MINUTES = 2;
 
@@ -27,6 +28,7 @@ type ExpiredBooking = {
 
 type ExpiredFarmer = {
   farmer_id: string | null;
+  external_callback_url?: string | null;
 } | null;
 
 const failureCallbackPayload = (booking: ExpiredBooking, farmer: ExpiredFarmer) => ({
@@ -54,10 +56,12 @@ Deno.serve(async (req) => {
 
     const { data: bookings, error: lookupErr } = await supabase
       .from("bookings")
-      .select("id, farmer_id, payment_reference, callback_url, farmers(farmer_id)")
+      .select("id, farmer_id, payment_reference, callback_url, source, booking_status, farmers(farmer_id, external_callback_url)")
       .eq("payment_status", "pending")
-      .eq("booking_status", "pending_approval")
-      .lt("created_at", cutoff);
+      .not("payment_reference", "is", null)
+      .not("payment_requested_at", "is", null)
+      .in("booking_status", ["pending_approval", "approved"])
+      .lt("payment_requested_at", cutoff);
 
     if (lookupErr) {
       console.error("Pending booking expiry lookup error:", lookupErr);
@@ -68,6 +72,8 @@ Deno.serve(async (req) => {
     const callbackFailures: string[] = [];
 
     for (const booking of bookings || []) {
+      if (booking.booking_status === "pending_approval" && booking.source !== "procurement") continue;
+
       const { data: updated, error: updateErr } = await supabase
         .from("bookings")
         .update({
@@ -77,7 +83,7 @@ Deno.serve(async (req) => {
         })
         .eq("id", booking.id)
         .eq("payment_status", "pending")
-        .eq("booking_status", "pending_approval")
+        .in("booking_status", ["pending_approval", "approved"])
         .select("id")
         .maybeSingle();
 
@@ -111,6 +117,18 @@ Deno.serve(async (req) => {
           callbackFailures.push(`${booking.id}:network_error`);
         }
       }
+
+      await postMainPlatformCallback(booking.farmers?.external_callback_url, {
+        event: "payment_timeout",
+        data: {
+          booking_ref: booking.id,
+          payment_reference: booking.payment_reference,
+          farmer_id: booking.farmers?.farmer_id ?? null,
+          payment_status: "rejected",
+          booking_status: "rejected",
+          reason: "payment_timeout",
+        },
+      });
     }
 
     return json(200, {

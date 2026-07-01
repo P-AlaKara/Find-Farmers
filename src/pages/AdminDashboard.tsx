@@ -111,29 +111,10 @@ const AdminDashboard = () => {
   });
 
   const updateBooking = useMutation({
-    mutationFn: async ({ id, farmerId, status, booking }: { id: string; farmerId: string; status: "confirmed" | "rejected"; booking?: any }) => {
+    mutationFn: async ({ id, farmerId, status }: { id: string; farmerId: string; status: "approved" | "rejected" }) => {
       const session = getSession();
       const { data, error } = await supabase.functions.invoke("api-auth/admin/booking/update", { body: { admin_id: session?.userId, id, farmerId, status } });
       if (error || data?.error) throw new Error(data?.error || error?.message);
-
-      if (status === "confirmed" && booking) {
-        try {
-          await supabase.functions.invoke("send-booking-email", {
-            body: {
-              buyerEmail: booking.buyers?.email,
-              buyerName: booking.buyers?.buyer_name,
-              farmerName: booking.farmers?.full_name,
-              farmerPhone: booking.farmers?.phone_number,
-              farmerLocation: `${booking.farmers?.county}, ${booking.farmers?.ward}, ${booking.farmers?.specific_location}`,
-              potatoVariety: booking.farmers?.potato_variety,
-              acresBooked: booking.acres_booked,
-            },
-          });
-        } catch (emailErr) {
-          console.error("Email notification failed:", emailErr);
-          toast.error("Booking confirmed but email notification failed");
-        }
-      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
@@ -412,7 +393,7 @@ const AdminDashboard = () => {
           <TabsContent value="bookings">
             <div className="mb-3 flex flex-wrap gap-2">
               <Input className="w-64" placeholder="Search booking ID/farmer/buyer" value={bookingFilters.search} onChange={(e)=>setBookingFilters((p)=>({...p, search:e.target.value}))} />
-              <Select value={bookingFilters.status} onValueChange={(v)=>setBookingFilters((p)=>({...p,status:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="Booking status" /></SelectTrigger><SelectContent><SelectItem value="all">All booking statuses</SelectItem><SelectItem value="pending_approval">Pending approval</SelectItem><SelectItem value="confirmed">Confirmed</SelectItem><SelectItem value="rejected">Rejected</SelectItem></SelectContent></Select>
+              <Select value={bookingFilters.status} onValueChange={(v)=>setBookingFilters((p)=>({...p,status:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="Booking status" /></SelectTrigger><SelectContent><SelectItem value="all">All booking statuses</SelectItem><SelectItem value="pending_approval">Pending approval</SelectItem><SelectItem value="approved">Approved</SelectItem><SelectItem value="confirmed">Confirmed</SelectItem><SelectItem value="rejected">Rejected</SelectItem></SelectContent></Select>
               <Select value={bookingFilters.payment} onValueChange={(v)=>setBookingFilters((p)=>({...p,payment:v}))}><SelectTrigger className="w-44"><SelectValue placeholder="Payment status" /></SelectTrigger><SelectContent><SelectItem value="all">All payment statuses</SelectItem><SelectItem value="pending">Pending</SelectItem><SelectItem value="paid">Paid</SelectItem><SelectItem value="rejected">Rejected</SelectItem><SelectItem value="promo_code">Promo</SelectItem></SelectContent></Select>
             </div>
             <div className="rounded-lg border overflow-x-auto max-h-[500px] overflow-y-auto">
@@ -448,8 +429,8 @@ const AdminDashboard = () => {
                       <TableCell>
                         {b.booking_status === "pending_approval" && (
                           <div className="flex gap-1">
-                            <Button size="sm" className="h-7 text-xs" onClick={() => updateBooking.mutate({ id: b.id, farmerId: b.farmer_id, status: "confirmed", booking: b })}>
-                              <CheckCircle className="mr-1 h-3 w-3" /> Confirm
+                            <Button size="sm" className="h-7 text-xs" onClick={() => updateBooking.mutate({ id: b.id, farmerId: b.farmer_id, status: "approved" })}>
+                              <CheckCircle className="mr-1 h-3 w-3" /> Approve
                             </Button>
                             <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => updateBooking.mutate({ id: b.id, farmerId: b.farmer_id, status: "rejected", booking: b })}>
                               <XCircle className="mr-1 h-3 w-3" /> Reject

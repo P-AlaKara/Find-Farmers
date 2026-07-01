@@ -1,6 +1,7 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import bcrypt from "npm:bcryptjs@2.4.3";
 import { sendEmail } from "../_shared/resend.js";
+import { postMainPlatformCallback } from "../_shared/main-platform.ts";
 
 const hash = (s: string, r: number) => bcrypt.hash(s, r);
 const compare = (s: string, h: string) => bcrypt.compare(s, h);
@@ -21,6 +22,39 @@ const isValidDate = (value: unknown) => {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   return !Number.isNaN(new Date(`${value}T00:00:00Z`).getTime());
 };
+
+async function notifyBookingLifecycle(db: ReturnType<typeof sb>, booking_id: string, event: string) {
+  const { data: booking, error } = await db
+    .from("bookings")
+    .select("id, payment_status, booking_status, total_amount, farmer_confirmed_at, payment_requested_at, received_confirmed_at, farmers(farmer_id, external_callback_url), buyers(buyer_name, company_name, phone_number, email, county)")
+    .eq("id", booking_id)
+    .maybeSingle();
+  if (error || !booking) {
+    if (error) console.error("Lifecycle callback lookup failed:", error);
+    return;
+  }
+  const farmer = Array.isArray(booking.farmers) ? booking.farmers[0] : booking.farmers;
+  const buyer = Array.isArray(booking.buyers) ? booking.buyers[0] : booking.buyers;
+  await postMainPlatformCallback(farmer?.external_callback_url, {
+    event,
+    data: {
+      booking_ref: booking.id,
+      farmer_id: farmer?.farmer_id ?? null,
+      payment_status: booking.payment_status,
+      booking_status: booking.booking_status,
+      total_amount: booking.total_amount,
+      farmer_confirmed_at: booking.farmer_confirmed_at,
+      payment_requested_at: booking.payment_requested_at,
+      received_confirmed_at: booking.received_confirmed_at,
+      buyer: {
+        company_name: buyer?.company_name ?? buyer?.buyer_name ?? null,
+        phone: buyer?.phone_number ?? null,
+        email: buyer?.email ?? null,
+        county: buyer?.county ?? null,
+      },
+    },
+  });
+}
 
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
@@ -237,7 +271,7 @@ Deno.serve(async (req) => {
     if (!buyer_id) return j({ error: "Missing buyer_id" }, 400);
     const { data, error } = await db
       .from("bookings")
-      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, received_confirmed_at, final_price, delivery_date, buyer_rating, farmers(full_name, county, phone_number, potato_variety)")
+      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, farmer_confirmed_at, payment_requested_at, received_confirmed_at, final_price, delivery_date, buyer_rating, farmers(full_name, county, phone_number, potato_variety)")
       .eq("buyer_id", buyer_id)
       .order("created_at", { ascending: false });
     if (error) return j({ error: error.message }, 400);
@@ -254,7 +288,7 @@ Deno.serve(async (req) => {
 
     const { data: bookings, error: bookingsError } = await db
       .from("bookings")
-      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, received_confirmed_at, final_price, delivery_date, buyer_rating, farmers(full_name, county, phone_number, potato_variety, farmer_id)")
+      .select("id, acres_booked, price_per_acre, total_amount, payment_status, booking_status, created_at, farmer_confirmed_at, payment_requested_at, received_confirmed_at, final_price, delivery_date, buyer_rating, farmers(full_name, county, phone_number, potato_variety, farmer_id)")
       .eq("buyer_id", buyer_id)
       .order("created_at", { ascending: false });
     if (bookingsError) return j({ error: bookingsError.message }, 400);
@@ -312,6 +346,7 @@ Deno.serve(async (req) => {
       .select("id, received_confirmed_at, final_price, delivery_date, buyer_rating")
       .single();
     if (error) return j({ error: error.message }, 400);
+    await notifyBookingLifecycle(db, booking_id, "booking_received");
     return j({ ok: true, data });
   }
 
@@ -391,11 +426,61 @@ Deno.serve(async (req) => {
     if (farmerError) return j({ error: farmerError.message }, 400);
     const { data: bookings, error: bookingsError } = await db
       .from("bookings")
-      .select("id, acres_booked, total_amount, price_per_acre, payment_status, booking_status, created_at, buyer_id, buyers(buyer_name, phone_number, email, county)")
+      .select("id, acres_booked, total_amount, price_per_acre, payment_status, booking_status, created_at, farmer_confirmed_at, payment_requested_at, buyer_id, buyers(buyer_name, phone_number, email, county)")
       .eq("farmer_id", farmer_id)
       .order("created_at", { ascending: false });
     if (bookingsError) return j({ error: bookingsError.message }, 400);
     return j({ farmer, bookings: bookings || [] });
+  }
+
+  if (path === "/farmer/booking/decision" && req.method === "POST") {
+    const { farmer_id, booking_id, decision } = await req.json();
+    if (!farmer_id || !booking_id) return j({ error: "Missing farmer_id or booking_id" }, 400);
+    if (decision !== "approve" && decision !== "reject") return j({ error: "decision must be approve or reject" }, 400);
+
+    const { data: booking, error: fetchError } = await db
+      .from("bookings")
+      .select("id, farmer_id, booking_status, payment_status")
+      .eq("id", booking_id)
+      .eq("farmer_id", farmer_id)
+      .maybeSingle();
+    if (fetchError) return j({ error: fetchError.message }, 400);
+    if (!booking) return j({ error: "Booking not found" }, 404);
+    if (booking.booking_status === "approved" && decision === "approve") return j({ ok: true, data: booking });
+    if (booking.booking_status !== "pending_approval") return j({ error: "Only pending bookings can be updated" }, 409);
+
+    if (decision === "approve") {
+      const confirmedAt = new Date().toISOString();
+      const { data, error } = await db
+        .from("bookings")
+        .update({ booking_status: "approved", farmer_confirmed_at: confirmedAt })
+        .eq("id", booking_id)
+        .eq("farmer_id", farmer_id)
+        .eq("booking_status", "pending_approval")
+        .select("id, booking_status, payment_status, farmer_confirmed_at")
+        .single();
+      if (error) return j({ error: error.message }, 400);
+      await notifyBookingLifecycle(db, booking_id, "farmer_confirmed");
+      return j({ ok: true, data });
+    }
+
+    const { data, error } = await db
+      .from("bookings")
+      .update({ booking_status: "rejected", payment_status: "rejected" })
+      .eq("id", booking_id)
+      .eq("farmer_id", farmer_id)
+      .eq("booking_status", "pending_approval")
+      .select("id, booking_status, payment_status")
+      .single();
+    if (error) return j({ error: error.message }, 400);
+    const { error: farmerErr } = await db
+      .from("farmers")
+      .update({ listing_status: "available" })
+      .eq("id", farmer_id)
+      .eq("listing_status", "booked");
+    if (farmerErr) return j({ error: farmerErr.message }, 400);
+    await notifyBookingLifecycle(db, booking_id, "farmer_rejected");
+    return j({ ok: true, data });
   }
 if (path === "/farmer/profile" && req.method === "GET") {
     const farmer_id = url.searchParams.get("farmer_id");
@@ -524,10 +609,14 @@ if (path === "/farmer/profile" && req.method === "GET") {
   if (path === "/admin/booking/update" && req.method === "POST") {
     const { admin_id, id, farmerId, status } = await req.json();
     if (!(await isAdmin(db, admin_id))) return j({ error: "Unauthorized" }, 403);
-    const { error: bookingErr } = await db.from("bookings").update({ booking_status: status, payment_status: status === "confirmed" ? "paid" : "rejected" }).eq("id", id);
+    const updates = status === "rejected"
+      ? { booking_status: "rejected", payment_status: "rejected" }
+      : { booking_status: "approved", farmer_confirmed_at: new Date().toISOString() };
+    const { error: bookingErr } = await db.from("bookings").update(updates).eq("id", id);
     if (bookingErr) return j({ error: bookingErr.message }, 400);
-    const { error: farmerErr } = await db.from("farmers").update({ listing_status: status === "confirmed" ? "booked" : "available" }).eq("id", farmerId);
+    const { error: farmerErr } = await db.from("farmers").update({ listing_status: status === "rejected" ? "available" : "booked" }).eq("id", farmerId);
     if (farmerErr) return j({ error: farmerErr.message }, 400);
+    await notifyBookingLifecycle(db, id, status === "rejected" ? "farmer_rejected" : "farmer_confirmed");
     return j({ ok: true });
   }
 

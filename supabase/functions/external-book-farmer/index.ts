@@ -1,4 +1,4 @@
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient } from "npm:@supabase/supabase-js@2";
 import { validateExternalBookingRequest } from "./validation.ts";
 
 const PRICE_PER_ACRE = 5000;
@@ -192,6 +192,7 @@ Deno.serve(async (req) => {
         payment_status: "pending",
         booking_status: "pending_approval",
         callback_url,
+        source: "procurement",
       })
       .select("id")
       .single();
@@ -229,7 +230,7 @@ Deno.serve(async (req) => {
     const totalAmount = farmAcreage * PRICE_PER_ACRE;
     const { error: refErr } = await supabase
       .from("bookings")
-      .update({ payment_reference: paymentReference })
+      .update({ payment_reference: paymentReference, source: "procurement", payment_requested_at: new Date().toISOString() })
       .eq("id", booking.id);
     if (refErr) {
       console.error("Payment reference update error:", refErr);

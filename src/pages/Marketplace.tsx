@@ -14,7 +14,7 @@ import Navbar from "@/components/Navbar";
 import { supabase } from "@/integrations/supabase/client";
 import { getSession } from "@/lib/auth";
 import { KENYA_COUNTIES, POTATO_VARIETIES, HARVEST_DAYS } from "@/data/kenyaLocations";
-import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2, Smartphone, LogIn } from "lucide-react";
+import { MapPin, Calendar, Wheat, LayoutGrid, TableIcon, Search, Loader2, CheckCircle2, LogIn } from "lucide-react";
 import { format, addDays } from "date-fns";
 
 const getEstimatedHarvest = (plantingDate: string, variety: string) => {
@@ -35,7 +35,6 @@ const Marketplace = () => {
   const [submitting, setSubmitting] = useState(false);
   const [modalMessage, setModalMessage] = useState<{ type: "error" | "info"; text: string } | null>(null);
   const [successBanner, setSuccessBanner] = useState<string | null>(null);
-  const [paymentOverlay, setPaymentOverlay] = useState<{ reference: string; bookingRef: string; message: string; paid: boolean; timeout: boolean } | null>(null);
 
   const { data: farmers = [], isLoading } = useQuery({
     queryKey: ["marketplace-farmers"],
@@ -81,45 +80,22 @@ const Marketplace = () => {
     setModalMessage(null);
     setSubmitting(true);
     try {
-      const { data, error } = await supabase.functions.invoke("initialize-payment", {
+      const { data, error } = await supabase.functions.invoke("request-booking", {
         body: { farmer_id: bookingFarmer.id, buyer_id: session.userId },
       });
-      if (error || data?.ok === false || !data?.data?.reference) {
-        const msg = data?.request_id
-          ? `${data?.error || "We could not start the M-Pesa payment. Please try again."} Reference: ${data.request_id}`
-          : data?.error || "We could not start the M-Pesa payment. Please try again.";
+      if (error || data?.ok === false) {
+        const msg = data?.error || "We could not request this booking. Please try again.";
         setModalMessage({ type: "error", text: msg });
         setSubmitting(false);
         return;
       }
-      const { reference, booking_ref, message } = data.data;
       setSubmitting(false);
       setBookingFarmer(null);
-      setPaymentOverlay({ reference, bookingRef: booking_ref, message, paid: false, timeout: false });
-
-      let attempts = 0;
-      const maxAttempts = 35;
-      const intervalId = window.setInterval(async () => {
-        attempts += 1;
-        const { data: statusData, error: statusError } = await supabase.functions.invoke(`booking-status?reference=${reference}`, { method: "GET" });
-        if (!statusError && statusData?.data?.payment_status === "paid") {
-          window.clearInterval(intervalId);
-          setPaymentOverlay((prev) => prev ? { ...prev, paid: true } : prev);
-          setSuccessBanner("Booking confirmed! The farm has been reserved for you.");
-          toast.success("Booking confirmed!");
-          queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
-        } else if (!statusError && statusData?.data?.payment_status === "rejected") {
-          window.clearInterval(intervalId);
-          setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
-          toast.error("Payment timed out. The farm has been released.");
-          queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
-        } else if (attempts >= maxAttempts) {
-          window.clearInterval(intervalId);
-          setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
-        }
-      }, 4000);
+      setSuccessBanner("Booking requested. The farmer will confirm availability before payment is requested.");
+      toast.success("Booking requested");
+      queryClient.invalidateQueries({ queryKey: ["marketplace-farmers"] });
     } catch {
-      setModalMessage({ type: "error", text: "We could not start the M-Pesa payment. Please try again." });
+      setModalMessage({ type: "error", text: "We could not request this booking. Please try again." });
       setSubmitting(false);
     }
   };
@@ -261,8 +237,8 @@ const Marketplace = () => {
       <Dialog open={!!bookingFarmer} onOpenChange={(o) => !o && closeBooking()}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Confirm Booking</DialogTitle>
-            <DialogDescription>You are about to reserve the full farm. This cannot be partially booked.</DialogDescription>
+            <DialogTitle>Request Booking</DialogTitle>
+            <DialogDescription>The farmer will confirm availability before you are asked to pay.</DialogDescription>
           </DialogHeader>
           {bookingFarmer && (
             <div className="space-y-3 rounded-lg border bg-secondary/30 p-4 text-sm">
@@ -285,44 +261,11 @@ const Marketplace = () => {
           <DialogFooter>
             <Button variant="outline" onClick={closeBooking} disabled={submitting}>Cancel</Button>
             <Button onClick={confirmBooking} disabled={submitting}>
-              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Processing...</>) : "Confirm & Pay"}
+              {submitting ? (<><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Requesting...</>) : "Request Booking"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {paymentOverlay && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6">
-          <div className="w-full max-w-lg rounded-xl border bg-card p-8 text-center shadow-lg">
-            {!paymentOverlay.paid ? (
-              <>
-                <Smartphone className="mx-auto mb-4 h-14 w-14 text-primary" />
-                <h2 className="mb-2 text-2xl font-bold">Check your phone</h2>
-                <p className="mb-3 text-muted-foreground">{paymentOverlay.message}</p>
-                <p className="mb-3 text-sm font-medium">Do not close this window</p>
-                <p className="text-sm text-destructive">⚠️ Once you enter your PIN, the payment cannot be cancelled or refunded.</p>
-                {paymentOverlay.timeout && (
-                  <div className="mt-6">
-                    <p className="mb-4 text-sm text-muted-foreground">This is taking longer than expected. If you completed the M-Pesa payment, your booking will be confirmed shortly.</p>
-                    <Button onClick={() => setPaymentOverlay(null)}>Close</Button>
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="mx-auto mb-4 h-14 w-14 text-green-600" />
-                <h2 className="mb-2 text-2xl font-bold text-green-700">Booking Confirmed!</h2>
-                <p className="mb-2 text-muted-foreground">Your farm has been reserved.</p>
-                <p className="mb-6 text-sm font-medium">Booking Ref: {paymentOverlay.bookingRef}</p>
-                <div className="flex gap-3 justify-center">
-                  <Button asChild><Link to="/buyer/bookings">View My Procurement</Link></Button>
-                  <Button variant="outline" onClick={() => setPaymentOverlay(null)}>Close</Button>
-                </div>
-              </>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 };

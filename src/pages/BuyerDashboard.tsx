@@ -15,12 +15,14 @@ import {
   ArrowUpRight,
   CheckCircle2,
   Clock3,
+  CreditCard,
   FileClock,
   History,
   Leaf,
   PackageCheck,
   RefreshCw,
   ShoppingCart,
+  Smartphone,
   Star,
   User,
 } from "lucide-react";
@@ -50,6 +52,8 @@ type Booking = {
   payment_status: string;
   booking_status: string;
   created_at: string;
+  farmer_confirmed_at: string | null;
+  payment_requested_at: string | null;
   received_confirmed_at: string | null;
   final_price: number | null;
   delivery_date: string | null;
@@ -72,6 +76,12 @@ const fmtDate = (d?: string | null) => d ? new Date(d).toLocaleDateString("en-GB
 
 const statusVariant = (status: string) => status === "confirmed" || status === "resolved" ? "default" : status === "rejected" ? "destructive" : "secondary";
 const prettyStatus = (status: string) => status.replace(/_/g, " ");
+const buyerStatusLabel = (booking: Booking) => {
+  if (booking.booking_status === "pending_approval") return "Pending farmer confirmation";
+  if (booking.booking_status === "approved") return "Farmer confirmed. Complete payment";
+  if (booking.booking_status === "confirmed") return "Confirmed";
+  return prettyStatus(booking.booking_status);
+};
 
 export default function BuyerDashboard() {
   const session = getSession();
@@ -87,6 +97,8 @@ export default function BuyerDashboard() {
   const [receiptSaving, setReceiptSaving] = useState(false);
   const [complaintForm, setComplaintForm] = useState({ bookingId: "none", subject: "", content: "" });
   const [complaintSaving, setComplaintSaving] = useState(false);
+  const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
+  const [paymentOverlay, setPaymentOverlay] = useState<{ reference: string; bookingRef: string; message: string; paid: boolean; timeout: boolean } | null>(null);
 
   const loadDashboard = useCallback(async () => {
     if (!buyerId) return;
@@ -178,6 +190,43 @@ export default function BuyerDashboard() {
     await loadDashboard();
   };
 
+  const startPayment = async (booking: Booking) => {
+    if (!buyerId) return;
+    setPayingBookingId(booking.id);
+    const { data, error } = await supabase.functions.invoke("initialize-payment", {
+      body: { buyer_id: buyerId, booking_id: booking.id },
+    });
+    setPayingBookingId(null);
+    if (error || data?.ok === false || !data?.data?.reference) {
+      toast.error(data?.error || "Could not start payment. Please try again.");
+      return;
+    }
+
+    const { reference, booking_ref, message } = data.data;
+    setPaymentOverlay({ reference, bookingRef: booking_ref, message, paid: false, timeout: false });
+
+    let attempts = 0;
+    const maxAttempts = 35;
+    const intervalId = window.setInterval(async () => {
+      attempts += 1;
+      const { data: statusData, error: statusError } = await supabase.functions.invoke(`booking-status?reference=${reference}`, { method: "GET" });
+      if (!statusError && statusData?.data?.payment_status === "paid") {
+        window.clearInterval(intervalId);
+        setPaymentOverlay((prev) => prev ? { ...prev, paid: true } : prev);
+        toast.success("Booking confirmed!");
+        await loadDashboard();
+      } else if (!statusError && statusData?.data?.payment_status === "rejected") {
+        window.clearInterval(intervalId);
+        setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
+        toast.error("Payment timed out. The farm has been released.");
+        await loadDashboard();
+      } else if (attempts >= maxAttempts) {
+        window.clearInterval(intervalId);
+        setPaymentOverlay((prev) => prev ? { ...prev, timeout: true } : prev);
+      }
+    }, 4000);
+  };
+
   const BookingCards = ({ rows, action }: { rows: Booking[]; action?: (booking: Booking) => JSX.Element }) => (
     rows.length === 0 ? (
       <Card className="border-dashed bg-white/80 shadow-sm">
@@ -204,7 +253,7 @@ export default function BuyerDashboard() {
                     <div className="mt-1 break-all font-mono text-xs text-muted-foreground">Ref {booking.id}</div>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Badge variant={statusVariant(booking.booking_status)} className="capitalize">Status: {prettyStatus(booking.booking_status)}</Badge>
+                    <Badge variant={statusVariant(booking.booking_status)} className="capitalize">Status: {buyerStatusLabel(booking)}</Badge>
                     <Badge variant={booking.payment_status === "paid" ? "default" : "outline"} className="capitalize">Payment: {prettyStatus(booking.payment_status)}</Badge>
                   </div>
                 </div>
@@ -318,7 +367,17 @@ export default function BuyerDashboard() {
             <Button onClick={() => openReceiptDialog(booking)}><CheckCircle2 className="mr-2 h-4 w-4" /> Confirm Received</Button>
           )} />
         </TabsContent>
-        <TabsContent value="pending" className="mt-4"><BookingCards rows={pendingBookings} /></TabsContent>
+        <TabsContent value="pending" className="mt-4">
+          <BookingCards rows={pendingBookings} action={(booking) => (
+            booking.booking_status === "approved" ? (
+              <Button onClick={() => startPayment(booking)} disabled={payingBookingId === booking.id}>
+                <CreditCard className="mr-2 h-4 w-4" /> {payingBookingId === booking.id ? "Starting payment..." : "Pay now"}
+              </Button>
+            ) : (
+              <Badge variant="secondary">Pending farmer confirmation</Badge>
+            )
+          )} />
+        </TabsContent>
         <TabsContent value="history" className="mt-4"><BookingCards rows={historicalBookings} /></TabsContent>
         <TabsContent value="complaints" className="mt-4">
           <div className="grid gap-4 lg:grid-cols-[420px_1fr]">
@@ -391,6 +450,34 @@ export default function BuyerDashboard() {
           </div>
         </DialogContent>
       </Dialog>
+      {paymentOverlay && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/95 p-6">
+          <div className="w-full max-w-lg rounded-xl border bg-card p-8 text-center shadow-lg">
+            {!paymentOverlay.paid ? (
+              <>
+                <Smartphone className="mx-auto mb-4 h-14 w-14 text-primary" />
+                <h2 className="mb-2 text-2xl font-bold">Check your phone</h2>
+                <p className="mb-3 text-muted-foreground">{paymentOverlay.message}</p>
+                <p className="mb-3 text-sm font-medium">Do not close this window</p>
+                {paymentOverlay.timeout && (
+                  <div className="mt-6">
+                    <p className="mb-4 text-sm text-muted-foreground">This is taking longer than expected. If you completed the M-Pesa payment, your booking will be confirmed shortly.</p>
+                    <Button onClick={() => setPaymentOverlay(null)}>Close</Button>
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                <CheckCircle2 className="mx-auto mb-4 h-14 w-14 text-green-600" />
+                <h2 className="mb-2 text-2xl font-bold text-green-700">Booking Confirmed!</h2>
+                <p className="mb-2 text-muted-foreground">Your farm has been reserved.</p>
+                <p className="mb-6 text-sm font-medium">Booking Ref: {paymentOverlay.bookingRef}</p>
+                <Button onClick={() => setPaymentOverlay(null)}>Close</Button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

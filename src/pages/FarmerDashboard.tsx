@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { getSession, signOut } from "@/lib/auth";
@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { toast } from "sonner";
 
 type Booking = {
   id: string;
@@ -15,6 +16,8 @@ type Booking = {
   payment_status: string;
   booking_status: string;
   created_at: string;
+  farmer_confirmed_at: string | null;
+  payment_requested_at: string | null;
   buyer_id: string;
   buyers?: { buyer_name: string; phone_number: string; email: string; county: string } | null;
 };
@@ -35,27 +38,51 @@ type FarmerSummary = {
 
 const fmtKES = (n: number) => `KES ${Number(n).toLocaleString()}`;
 const fmtDate = (d: string) => new Date(d).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" });
+const farmerBookingStatus = (booking: Booking) => {
+  if (booking.booking_status === "pending_approval") return "Pending farmer confirmation";
+  if (booking.booking_status === "approved") return "Pending buyer confirmation";
+  if (booking.booking_status === "confirmed") return "Confirmed";
+  return booking.booking_status.replace(/_/g, " ");
+};
 
 export default function FarmerDashboard() {
   const navigate = useNavigate();
   const session = getSession();
+  const farmerId = session?.userId;
   const [farmer, setFarmer] = useState<FarmerSummary | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
+  const [savingDecisionId, setSavingDecisionId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!session) return;
-    (async () => {
-      const { data, error } = await supabase.functions.invoke("api-auth/farmer/dashboard", { body: { farmer_id: session.userId } });
-      if (!error && !data?.error) {
-        setFarmer((data?.farmer as FarmerSummary | null) || null);
-        setBookings((data?.bookings as unknown as Booking[]) || []);
-      }
-      setLoading(false);
-    })();
-  }, [session]);
+  const loadDashboard = useCallback(async () => {
+    if (!farmerId) return;
+    const { data, error } = await supabase.functions.invoke("api-auth/farmer/dashboard", { body: { farmer_id: farmerId } });
+    if (!error && !data?.error) {
+      setFarmer((data?.farmer as FarmerSummary | null) || null);
+      setBookings((data?.bookings as unknown as Booking[]) || []);
+    } else {
+      toast.error(data?.error || "Failed to load farmer dashboard");
+    }
+    setLoading(false);
+  }, [farmerId]);
+
+  useEffect(() => { void loadDashboard(); }, [loadDashboard]);
 
   if (!session || session.role !== "farmer") return <Navigate to="/login" replace />;
+
+  const decideBooking = async (booking: Booking, decision: "approve" | "reject") => {
+    setSavingDecisionId(booking.id);
+    const { data, error } = await supabase.functions.invoke("api-auth/farmer/booking/decision", {
+      body: { farmer_id: farmerId, booking_id: booking.id, decision },
+    });
+    setSavingDecisionId(null);
+    if (error || data?.error) {
+      toast.error(data?.error || "Failed to update booking");
+      return;
+    }
+    toast.success(decision === "approve" ? "Availability confirmed" : "Booking rejected");
+    await loadDashboard();
+  };
 
   const statusBadge = () => {
     if (farmer?.registration_status === "pending") return <Badge className="bg-amber-500 hover:bg-amber-500 text-white">Pending Approval</Badge>;
@@ -115,7 +142,7 @@ export default function FarmerDashboard() {
                     <CardTitle className="text-base">Booking Ref: <span className="font-mono text-sm">{r.id}</span></CardTitle>
                     <div className="flex gap-2">
                       <Badge variant={r.payment_status === "paid" ? "default" : "secondary"}>Payment: {r.payment_status}</Badge>
-                      <Badge variant="outline">Status: {r.booking_status}</Badge>
+                      <Badge variant="outline">Status: {farmerBookingStatus(r)}</Badge>
                     </div>
                   </div>
                 </CardHeader>
@@ -125,7 +152,18 @@ export default function FarmerDashboard() {
                     <div><div className="text-muted-foreground">Acres Booked</div><div>{r.acres_booked}</div></div>
                     <div><div className="text-muted-foreground">Total Amount</div><div className="font-semibold">{fmtKES(r.total_amount ?? r.acres_booked * r.price_per_acre)}</div></div>
                     <div><div className="text-muted-foreground">Payment</div><div>{r.payment_status}</div></div>
+                    <div><div className="text-muted-foreground">Booking Status</div><div>{farmerBookingStatus(r)}</div></div>
                   </div>
+                  {r.booking_status === "pending_approval" && (
+                    <div className="flex flex-wrap gap-2 border-t pt-3">
+                      <Button size="sm" onClick={() => decideBooking(r, "approve")} disabled={savingDecisionId === r.id}>
+                        {savingDecisionId === r.id ? "Saving..." : "Confirm Availability"}
+                      </Button>
+                      <Button size="sm" variant="destructive" onClick={() => decideBooking(r, "reject")} disabled={savingDecisionId === r.id}>
+                        Reject
+                      </Button>
+                    </div>
+                  )}
                   <Collapsible>
                     <CollapsibleTrigger asChild><Button variant="outline" size="sm">View Buyer Details</Button></CollapsibleTrigger>
                     <CollapsibleContent className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-3 text-sm border-t pt-3">

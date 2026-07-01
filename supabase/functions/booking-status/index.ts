@@ -1,12 +1,13 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { postMainPlatformCallback } from "../_shared/main-platform.ts";
 
 const PAYMENT_TIMEOUT_MINUTES = 2;
 
 const failureCallbackPayload = (booking: {
   id: string;
   payment_reference: string | null;
-  farmers?: { farmer_id: string | null } | null;
+  farmers?: { farmer_id: string | null; external_callback_url?: string | null } | null;
 }) => ({
   status: "failed",
   reason: "payment_timeout",
@@ -30,7 +31,9 @@ Deno.serve(async (req) => {
     }
 
     const url = new URL(req.url);
-    const reference = url.pathname.split("/").pop() || url.searchParams.get("reference") || "";
+    const lastPathPart = url.pathname.split("/").pop() || "";
+    const pathReference = lastPathPart === "booking-status" ? "" : lastPathPart;
+    const reference = url.searchParams.get("reference") || url.searchParams.get("booking_ref") || pathReference;
 
     if (!reference) {
       return new Response(JSON.stringify({ error: "Reference is required" }), {
@@ -44,11 +47,12 @@ Deno.serve(async (req) => {
       Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
     );
 
-    const { data: booking, error } = await supabase
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(reference);
+    let bookingQuery = supabase
       .from("bookings")
-      .select("id, farmer_id, payment_reference, payment_status, booking_status, created_at, callback_url, farmers(farmer_id)")
-      .eq("payment_reference", reference)
-      .maybeSingle();
+      .select("id, farmer_id, payment_reference, payment_status, booking_status, source, created_at, payment_requested_at, callback_url, farmers(farmer_id, external_callback_url)")
+    bookingQuery = isUuid ? bookingQuery.or(`payment_reference.eq.${reference},id.eq.${reference}`) : bookingQuery.eq("payment_reference", reference);
+    const { data: booking, error } = await bookingQuery.maybeSingle();
 
     if (error) throw error;
     if (!booking) {
@@ -60,8 +64,10 @@ Deno.serve(async (req) => {
 
     if (
       booking.payment_status === "pending" &&
-      booking.booking_status === "pending_approval" &&
-      Date.now() - new Date(booking.created_at).getTime() >= PAYMENT_TIMEOUT_MINUTES * 60 * 1000
+      Boolean(booking.payment_reference) &&
+      Boolean(booking.payment_requested_at) &&
+      (booking.booking_status === "approved" || (booking.booking_status === "pending_approval" && booking.source === "procurement")) &&
+      Date.now() - new Date(booking.payment_requested_at).getTime() >= PAYMENT_TIMEOUT_MINUTES * 60 * 1000
     ) {
       const { data: expiredBooking, error: expireErr } = await supabase
         .from("bookings")
@@ -72,7 +78,7 @@ Deno.serve(async (req) => {
         })
         .eq("id", booking.id)
         .eq("payment_status", "pending")
-        .eq("booking_status", "pending_approval")
+        .in("booking_status", ["pending_approval", "approved"])
         .select("id")
         .maybeSingle();
 
@@ -100,6 +106,18 @@ Deno.serve(async (req) => {
             console.error("Payment timeout callback failed:", callbackErr);
           }
         }
+
+        await postMainPlatformCallback(booking.farmers?.external_callback_url, {
+          event: "payment_timeout",
+          data: {
+            booking_ref: booking.id,
+            payment_reference: booking.payment_reference,
+            farmer_id: booking.farmers?.farmer_id ?? null,
+            payment_status: "rejected",
+            booking_status: "rejected",
+            reason: "payment_timeout",
+          },
+        });
       }
 
       return new Response(
